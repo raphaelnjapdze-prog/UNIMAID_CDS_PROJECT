@@ -38,10 +38,9 @@ def render_sidebar_nav(active: str):
     empty state, which logged the user out on every tab click.
     """
     with st.sidebar:
-        # Left-align the labels, and force readable label colors. The default
-        # secondary-button text rendered near-white on the light sidebar and was
-        # invisible until hover; pin inactive tabs to bold, near-black text (teal
-        # on hover) while keeping the active teal-filled tab's label white.
+        # Left-align the labels and give every tab a sky-blue fill: inactive tabs
+        # get a light sky blue with bold near-black text; the active tab gets a
+        # deeper sky blue with white text so it still stands out.
         st.markdown(
             """
             <style>
@@ -49,14 +48,23 @@ def render_sidebar_nav(active: str):
                 justify-content: flex-start;
                 font-weight: 700;
                 color: #111827 !important;
+                background-color: #87ceeb !important;
+                border-color: #6cb8dd !important;
             }
             section[data-testid="stSidebar"] .stButton > button:hover {
-                color: #0d9488 !important;
-                border-color: #0d9488 !important;
+                color: #111827 !important;
+                background-color: #6cb8dd !important;
+                border-color: #4aa3cf !important;
             }
-            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"],
+            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
+                color: #ffffff !important;
+                background-color: #0ea5e9 !important;
+                border-color: #0284c7 !important;
+            }
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"]:hover {
                 color: #ffffff !important;
+                background-color: #0284c7 !important;
+                border-color: #0284c7 !important;
             }
             </style>
             """,
