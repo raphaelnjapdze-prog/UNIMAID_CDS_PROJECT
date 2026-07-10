@@ -47,9 +47,6 @@ SUPABASE_SERVICE_CLIENT = (
     if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
     else None
 )
-SUPABASE_TABLE = "campus_audit_data"
-
-DB_FILE = "campus_audit_data.csv"
 UPLOAD_DIR = "uploaded_field_sheets"
 
 # --- LOCAL FALLBACK AUTHENTICATION CREDENTIAL SETTINGS ---
