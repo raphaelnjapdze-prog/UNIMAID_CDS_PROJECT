@@ -21,8 +21,9 @@ here return None/empty and the caller must show an honest "not connected"
 state rather than silently substituting fake data.
 """
 
+import json
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 
 import pandas as pd
 import streamlit as st
@@ -146,7 +147,7 @@ def submit_site_log_entry(
                 "other_genera_count": int(other_genera_count),
                 "field_notes": field_notes,
             },
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         },
         "pcr_status": "not_submitted",
     }
@@ -302,6 +303,43 @@ def extract_genus_counts_from_screening(field_screening_result: dict) -> dict:
     if genus in ("Anopheles", "Culex", "Aedes"):
         return {genus: 1}
     return {}
+
+
+def extract_primary_genus(field_screening_result) -> str | None:
+    """
+    Single resolved genus for one specimen from an identification screening
+    result, or None when undetermined or not applicable. manual_field_log
+    entries hold raw multi-genus counts, not a single identification, so they
+    return None here and are aggregated via extract_genus_counts_from_screening
+    instead.
+
+    This is the single source of truth for genus-from-result used by the
+    dashboard map summaries and DHIS2 aggregation; components must call it
+    rather than re-parsing field_screening_result themselves.
+    """
+    if not field_screening_result:
+        return None
+    if isinstance(field_screening_result, str):
+        try:
+            field_screening_result = json.loads(field_screening_result)
+        except Exception:
+            return None
+    if not isinstance(field_screening_result, dict):
+        return None
+
+    method = field_screening_result.get("screening_method")
+    result = field_screening_result.get("result") or {}
+
+    if method == "ai_vision":
+        return result.get("genus")
+    if method == "manual_checklist":
+        genus_triage = result.get("genus_triage")
+        if genus_triage:
+            return genus_triage.get("genus")
+        return result.get("genus") or result.get("resolved_genus")
+    if method == "trained_classifier":
+        return result.get("genus")
+    return None
 # =============================================================================
 # BIOASSAY RESULTS — WHO tube bioassay mortality/knockdown submission
 # =============================================================================

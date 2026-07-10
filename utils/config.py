@@ -41,12 +41,34 @@ SUPABASE_ANON_KEY = get_secret("SUPABASE_ANON_KEY")
 SUPABASE_SERVICE_ROLE_KEY = get_secret("SUPABASE_SERVICE_ROLE_KEY")
 
 SUPABASE_ENABLED = bool(SUPABASE_URL and SUPABASE_ANON_KEY)
-SUPABASE_CLIENT = create_client(SUPABASE_URL, SUPABASE_ANON_KEY) if SUPABASE_ENABLED else None
-SUPABASE_SERVICE_CLIENT = (
-    create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
-    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
-    else None
-)
+SUPABASE_SERVICE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
+
+# Supabase clients are built lazily on first use rather than at import time, so
+# importing this module — and therefore the whole app — never depends on
+# credentials being present and stays cheap to import/test. Each client is
+# created once and cached.
+_supabase_client = None
+_supabase_service_client = None
+
+
+def get_base_supabase_client():
+    """Anon Supabase client, created once on first use. None if not configured."""
+    global _supabase_client
+    if not SUPABASE_ENABLED:
+        return None
+    if _supabase_client is None:
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    return _supabase_client
+
+
+def get_service_supabase_client():
+    """Service-role Supabase client, created once on first use. None if not configured."""
+    global _supabase_service_client
+    if not SUPABASE_SERVICE_ENABLED:
+        return None
+    if _supabase_service_client is None:
+        _supabase_service_client = create_client(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+    return _supabase_service_client
 UPLOAD_DIR = "uploaded_field_sheets"
 
 # --- LOCAL FALLBACK AUTHENTICATION CREDENTIAL SETTINGS ---

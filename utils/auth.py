@@ -4,9 +4,8 @@
 import streamlit as st
 from datetime import datetime
 from utils.config import (
-    SUPABASE_CLIENT,
-    SUPABASE_ENABLED,
-    SUPABASE_SERVICE_CLIENT,
+    get_base_supabase_client,
+    get_service_supabase_client,
     ADMIN_USERNAME,
     ADMIN_EMAIL,
     ADMIN_PASSWORD
@@ -21,9 +20,9 @@ def get_supabase_client():
     client is fetched. This is what ensures every DB/storage request
     actually carries the logged-in user's credentials.
     """
-    if not SUPABASE_ENABLED:
+    client = get_base_supabase_client()
+    if client is None:
         return None
-    client = SUPABASE_CLIENT
     token = st.session_state.get("sb_access_token")
     if token:
         try:
@@ -35,7 +34,7 @@ def get_supabase_client():
 
 
 def get_supabase_service_client():
-    return SUPABASE_SERVICE_CLIENT
+    return get_service_supabase_client()
 
 
 def supabase_user():
@@ -72,7 +71,7 @@ def sign_in_user(email: str, password: str):
     re-applies them on every call, keeping all DB/storage requests
     authenticated as this user.
     """
-    client = SUPABASE_CLIENT if SUPABASE_ENABLED else None
+    client = get_base_supabase_client()
     if client:
         try:
             auth_response = client.auth.sign_in_with_password({"email": email, "password": password})
@@ -104,7 +103,7 @@ def sign_in_user(email: str, password: str):
 
 
 def sign_up_user(email: str, password: str, full_name: str):
-    client = SUPABASE_CLIENT if SUPABASE_ENABLED else None
+    client = get_base_supabase_client()
     if client:
         return client.auth.sign_up({
             "email": email,
@@ -146,7 +145,8 @@ def restore_session() -> bool:
 
     Returns True if a valid session was restored.
     """
-    if not SUPABASE_ENABLED:
+    client = get_base_supabase_client()
+    if client is None:
         return False
 
     access_token = st.session_state.get("sb_access_token")
@@ -155,7 +155,7 @@ def restore_session() -> bool:
         return False
 
     try:
-        auth_response = SUPABASE_CLIENT.auth.set_session(access_token, refresh_token)
+        auth_response = client.auth.set_session(access_token, refresh_token)
     except Exception:
         # Refresh token invalid, expired, or revoked — deny and reset.
         _clear_auth_state()
@@ -177,7 +177,7 @@ def restore_session() -> bool:
 
 
 def sign_out_user():
-    client = SUPABASE_CLIENT if SUPABASE_ENABLED else None
+    client = get_base_supabase_client()
     if client:
         try:
             client.auth.sign_out()
