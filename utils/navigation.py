@@ -2,12 +2,14 @@
 # ENTERPRISE PRODUCT NAVIGATION INTERFACE (utils/navigation.py)
 # =========================================================================
 import streamlit as st
-from utils.theme import COLORS
+
 from utils.icons import icon
+from utils.theme import COLORS
+
 
 def render_sidebar_nav(active: str):
     """Renders a collapsible sidebar navigation with all page links."""
-    
+
     # Format: (Query Parameter ID, Label Text, Lucide Icon Identifier)
     pages = [
         ("dashboard", "Command Center", "dashboard"),
@@ -25,12 +27,12 @@ def render_sidebar_nav(active: str):
         ("reports",   "Reports", "reports"),
         ("profile",   "Profile", "profile"),
     ]
-    
+
     with st.sidebar:
         st.markdown("""
             <style>
             .sidebar-nav-item { padding: 10px 0px; }
-            .sidebar-nav-item a { 
+            .sidebar-nav-item a {
                 display: flex;
                 align-items: center;
                 gap: 10px;
@@ -52,23 +54,23 @@ def render_sidebar_nav(active: str):
             .nav-icon { display: flex; align-items: center; }
             </style>
         """, unsafe_allow_html=True)
-        
+
         st.markdown("Navigation")
         st.markdown("---")
-        
+
         for key, label, icon_name in pages:
             is_active = key == active
             active_class = "active" if is_active else ""
-            
+
             icon_color = "#FFFFFF" if is_active else COLORS["text_secondary"]
             svg_icon = icon(icon_name, size=16, color=icon_color)
-            
+
             nav_link = f'<a class="{active_class}" href="/?page={key}" target="_self"><span class="nav-icon">{svg_icon}</span>{label}</a>'
             st.markdown(f'<div class="sidebar-nav-item">{nav_link}</div>', unsafe_allow_html=True)
 
 def render_top_nav(active: str):
     """Renders a persistent, app-like top navigation block driving URL query strings."""
-    
+
     # Format: (Query Parameter ID, Label Text, Lucide Icon Identifier)
     pages = [
         ("dashboard", "Command Center", "dashboard"),
@@ -86,12 +88,12 @@ def render_top_nav(active: str):
         ("reports",   "Reports", "reports"),
         ("profile",   "Profile", "profile"),
     ]
-    
+
     tabs_html = ""
     for key, label, icon_name in pages:
         is_active = key == active
         active_class = "active" if is_active else ""
-        
+
         icon_color = "#FFFFFF" if is_active else COLORS["text_secondary"]
         svg_icon = icon(icon_name, size=15, color=icon_color)
 

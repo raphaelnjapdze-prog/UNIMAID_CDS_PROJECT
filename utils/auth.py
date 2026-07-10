@@ -1,14 +1,16 @@
 # =========================================================================
 # AUTHENTICATION & DATABASE CORE UTILITIES (utils/auth.py)
 # =========================================================================
-import streamlit as st
 from datetime import datetime
+
+import streamlit as st
+
 from utils.config import (
+    ADMIN_EMAIL,
+    ADMIN_PASSWORD,
+    ADMIN_USERNAME,
     get_base_supabase_client,
     get_service_supabase_client,
-    ADMIN_USERNAME,
-    ADMIN_EMAIL,
-    ADMIN_PASSWORD
 )
 from utils.logging_config import get_logger
 

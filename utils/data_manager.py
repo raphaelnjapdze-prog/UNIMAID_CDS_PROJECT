@@ -23,16 +23,16 @@ state rather than silently substituting fake data.
 
 import json
 import uuid
-from datetime import datetime, date, timezone
+from datetime import date, datetime, timezone
 
 import pandas as pd
 import streamlit as st
 
 from utils.auth import (
-    get_supabase_client,
-    get_supabase_service_client,
     get_current_user_email,
     get_current_user_id,
+    get_supabase_client,
+    get_supabase_service_client,
 )
 from utils.logging_config import get_logger
 

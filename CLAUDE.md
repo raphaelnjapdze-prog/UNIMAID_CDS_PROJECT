@@ -12,9 +12,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 streamlit run app.py
 ```
 
-Dependencies: `pip install -r requirements.txt`. Note that `requirements.txt` covers the **runtime web app only**. The `models/` training/inference pipeline additionally requires `torch` and `torchvision`, which are intentionally not listed — the deep-learning classifier is a separate, optional workflow (see below) and the deployed app runs without it.
+Dependencies are pinned across three files:
+- `requirements.txt` — core runtime for the Streamlit app (pinned `==`).
+- `requirements-ml.txt` — heavy, optional ML extras (`torch`, `torchvision`, `opencv-python`) for the `models/` classifier and retraining workflow; all lazy-imported, so the app runs without them. Pulls torch CPU wheels from the PyTorch index.
+- `requirements-dev.txt` — dev/CI tooling (`pytest`, `ruff`); also installs core.
 
-There is no test suite or linter configured. `scripts/test_image_qc.py` is a standalone manual check for `utils/image_quality_control.py`, not a pytest test.
+```bash
+pip install -r requirements.txt        # run the app
+pip install -r requirements-dev.txt     # develop / run tests + lint
+pip install -r requirements-ml.txt      # additionally, to train/run models
+```
+
+## Tests, lint, CI
+
+```bash
+pytest                 # unit tests in tests/
+ruff check .           # lint (config in pyproject.toml)
+ruff check . --fix     # auto-fix
+```
+
+Tests live in `tests/` and target the deterministic logic (genus resolution, WHO bioassay thresholds, CSV-injection guard, the local-admin auth fallback) — the pure functions worth locking down. Ruff config is in `pyproject.toml`: rules `E/F/W/I`, `E501` off (legacy embeds long HTML/CSS strings), and `app.py` is exempt from `E402` (Streamlit requires `set_page_config` before page imports). GitHub Actions (`.github/workflows/ci.yml`) runs ruff + pytest on push/PR against Python 3.12 using `requirements-dev.txt`. CI does not install the ML extras — nothing under test imports them.
 
 ## Configuration & secrets
 

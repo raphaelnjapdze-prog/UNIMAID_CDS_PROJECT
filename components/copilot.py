@@ -1,10 +1,12 @@
 # =========================================================================
 # LIVE WHO-STANDARD ENTOMOLOGY AI KNOWLEDGE COPILOT (components/copilot.py)
 # =========================================================================
+import os
+
 import streamlit as st
 from google import genai
 from google.genai import types
-import os
+
 
 def get_live_copilot_response(user_query: str) -> str:
     """
@@ -13,7 +15,7 @@ def get_live_copilot_response(user_query: str) -> str:
     """
     # Pull the API key securely from Streamlit secrets or system environment
     api_key = st.secrets.get("GEMINI_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    
+
     if not api_key:
         return (
             "⚠️ **API Key Configuration Required**\n\n"
@@ -26,14 +28,14 @@ def get_live_copilot_response(user_query: str) -> str:
             "GEMINI_API_KEY = \"your_actual_api_key_here\"\n"
             "```"
         )
-    
+
     try:
         # Initialize the modern standard GenAI client
         client = genai.Client(api_key=api_key)
-        
+
         # Define the search grounding tool utilizing the explicit SDK types
         search_tool = types.Tool(google_search=types.GoogleSearch())
-        
+
         # Build the configuration block with the system persona instructions
         config = types.GenerateContentConfig(
             tools=[search_tool],
@@ -48,7 +50,7 @@ def get_live_copilot_response(user_query: str) -> str:
                 "- Keep responses actionable, scientific, clear, and structured for field investigators."
             )
         )
-        
+
         # Execute the query content generation pass
         response = client.models.generate_content(
             model="gemini-2.5-flash",
@@ -58,14 +60,14 @@ def get_live_copilot_response(user_query: str) -> str:
         return response.text
 
     except Exception as e:
-        return f"❌ **Entomological Core Error:** Failed to establish live uplink stream. Details: {str(e)}"
+        return f" Entomological Core Error: Failed to establish live uplink stream. Details: {str(e)}"
 
 
 def render_copilot_page():
     """Renders the stateful, live-connected conversational interface."""
-    st.markdown("## 🤖 WHO Vector Control AI Copilot (Live Web Grounding)")
+    st.markdown(" WHO Vector Control AI Copilot (Live Web Grounding)")
     st.markdown("---")
-    
+
     st.write(
         "This terminal is connected via API to live search engines. It dynamically evaluates online databases "
         "to answer technical queries regarding Integrated Vector Management (IVM), larviciding, and field operations."
@@ -94,5 +96,5 @@ def render_copilot_page():
             with st.spinner("Executing live web search and synthesizing academic literature..."):
                 response = get_live_copilot_response(user_input)
                 st.markdown(response)
-                
+
         st.session_state["chat_messages"].append({"role": "assistant", "content": response})

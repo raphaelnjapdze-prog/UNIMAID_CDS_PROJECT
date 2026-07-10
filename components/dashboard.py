@@ -11,14 +11,14 @@ import json
 import os
 from datetime import datetime
 
+import folium
 import pandas as pd
 import streamlit as st
-import folium
 from streamlit_folium import st_folium
 
-from utils.icons import render_page_header
 from utils.auth import get_supabase_client
-from utils.data_manager import load_specimen_records, extract_primary_genus
+from utils.data_manager import extract_primary_genus, load_specimen_records
+from utils.icons import render_page_header
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)

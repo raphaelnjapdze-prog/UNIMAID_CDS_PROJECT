@@ -7,15 +7,15 @@ reflect something real, or be honestly labeled as unavailable. No fabricated
 numbers, no fake "it worked" toasts for features that aren't wired up yet.
 """
 
-import streamlit as st
-import os
-import json
 import base64
+import json
+import os
 import time
-import datetime
+
 import pandas as pd
+import streamlit as st
 from PIL import Image
-from utils.auth import sign_out_user
+
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -35,7 +35,7 @@ COLORS = {
 # shared path would let every user overwrite each other's data.
 def _profile_paths():
     try:
-        from utils.auth import get_current_user_id, get_current_user_email
+        from utils.auth import get_current_user_email, get_current_user_id
         uid = get_current_user_id() or get_current_user_email() or "guest"
     except Exception:
         uid = "guest"
@@ -48,7 +48,7 @@ def load_profile_meta():
     profile_json_path, _ = _profile_paths()
 
     try:
-        from utils.auth import get_display_name, get_current_user_email
+        from utils.auth import get_current_user_email, get_display_name
         auth_name = get_display_name()
         auth_email = get_current_user_email()
     except Exception:
@@ -198,7 +198,10 @@ def render_profile_page():
     auth_ok = True
     try:
         from utils.auth import (
-            get_supabase_client, sign_out_user, get_current_user_email, get_current_user_id,
+            get_current_user_email,
+            get_current_user_id,
+            get_supabase_client,
+            sign_out_user,
         )
     except ImportError as e:
         auth_ok = False
@@ -379,7 +382,7 @@ def render_profile_page():
         st.subheader("Database Schema")
         if auth_ok:
             try:
-                from utils.data_manager import current_supabase_table_status, attempt_create_supabase_table
+                from utils.data_manager import attempt_create_supabase_table, current_supabase_table_status
                 st.code(current_supabase_table_status(), language="text")
                 if st.button("Provision Remote Tables", use_container_width=True):
                     with st.spinner("Running migration..."):
@@ -430,7 +433,7 @@ def render_profile_page():
     with tab_danger:
         st.subheader("Account Deletion")
         st.markdown(
-            f"""
+            """
             <div style="border:1px solid #FCA5A5; border-radius:10px; padding:16px; background:#FEF2F2;">
                 <p style="font-size:14px; color:#991B1B; margin:0;">
                     Account deletion requires administrator action to preserve the audit

@@ -12,8 +12,7 @@ It provides:
 from __future__ import annotations
 
 import io
-import json
-from typing import Any, Dict, Optional, List
+from typing import Any, Dict, Optional
 
 import pandas as pd
 import qrcode

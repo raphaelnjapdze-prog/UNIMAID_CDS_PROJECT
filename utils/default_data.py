@@ -3,6 +3,7 @@
 # =========================================================================
 import pandas as pd
 
+
 def get_clean_default_data() -> pd.DataFrame:
     """Returns the baseline structural dataframe for local fallback operations."""
     columns = [

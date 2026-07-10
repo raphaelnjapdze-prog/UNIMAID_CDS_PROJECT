@@ -1,0 +1,7 @@
+# Development & CI tooling — not needed to run the app.
+# Installs the core app too, so `pip install -r requirements-dev.txt` gives a
+# full dev/test environment (torch ML extras are separate: requirements-ml.txt).
+-r requirements.txt
+
+pytest==9.1.1
+ruff==0.15.21

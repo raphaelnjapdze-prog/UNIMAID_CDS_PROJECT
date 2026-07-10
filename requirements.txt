@@ -1,8 +1,33 @@
-streamlit
-supabase
-streamlit-folium
-plotly
-folium
-pandas
-python-dotenv
-google-genai
+# Core runtime dependencies for the Vector Sentinel Streamlit app.
+# Pinned for reproducible builds. Heavy/optional ML-training deps
+# (torch, torchvision, opencv) are lazy-imported and live in
+# requirements-ml.txt so the app runs without them.
+
+# ── Web app framework ────────────────────────────────────
+streamlit==1.58.0
+
+# ── Backend: auth, data, storage ─────────────────────────
+supabase==2.31.0
+
+# ── Data & numerics (imported at startup via utils/config) ─
+pandas==3.0.3
+numpy==2.4.6
+scipy==1.17.1
+
+# ── Visualization & mapping ──────────────────────────────
+plotly==6.8.0
+folium==0.20.0
+streamlit-folium==0.27.2
+
+# ── ML inference for the Risk page (imported at startup) ──
+scikit-learn==1.8.0
+joblib==1.5.3
+
+# ── AI: Gemini vision + advisory ─────────────────────────
+google-genai==2.7.0
+
+# ── Imaging, HTTP, QR, config ────────────────────────────
+pillow==12.2.0
+requests==2.34.2
+qrcode==8.2
+python-dotenv==1.2.2

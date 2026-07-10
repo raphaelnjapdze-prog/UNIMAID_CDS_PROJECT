@@ -1,10 +1,11 @@
 # =========================================================================
 # NATIONAL INFORMATION SYSTEM API GATEWAY INTERFACE (utils/dhis2_client.py)
 # =========================================================================
-import streamlit as st
-import requests
 import json
+
 import pandas as pd
+import requests
+import streamlit as st
 
 from utils.logging_config import get_logger
 
@@ -13,7 +14,7 @@ logger = get_logger(__name__)
 # Hardcoded dictionary placeholder showing how standard regional names map
 # to unique UIDs inside the National DHIS2 Organisation Unit registry.
 NIGERIA_NHMIS_ORG_UNITS = {
-    "Maiduguri": "Hg7824kHGhd", 
+    "Maiduguri": "Hg7824kHGhd",
     "Jere": "Yt8923jHGfd",
     "Bama": "Pl6712mNBvc",
     "Biye": "Kj8934nBvcd"
@@ -30,7 +31,7 @@ VECTOR_DATA_ELEMENT_MAPPINGS = {
 
 def convert_date_to_dhis2_period(date_str):
     """
-    Normalizes a standard YYYY-MM-DD date vector into a valid DHIS2 
+    Normalizes a standard YYYY-MM-DD date vector into a valid DHIS2
     reporting period format. Default configuration uses daily tracking string formats.
     """
     try:
@@ -65,13 +66,13 @@ def push_vector_payload_to_dhis2(dataframe):
     for idx, row in dataframe.iterrows():
         lga_name = row.get("LGA_District", "")
         org_unit_uid = NIGERIA_NHMIS_ORG_UNITS.get(lga_name, None)
-        
+
         # Skip row processing loops if the locality can't be mapped to an authorized organizational node
         if not org_unit_uid:
             continue
-            
+
         period_string = convert_date_to_dhis2_period(row.get("Collection_Date", ""))
-        
+
         # Determine target fallback tracking vector column keys
         anoph_key = "Anopheles" if "Anopheles" in dataframe.columns else "Anopheles_Count"
         culex_key = "Culex" if "Culex" in dataframe.columns else "Culex_Count"

@@ -1,0 +1,15 @@
+# Optional heavy ML dependencies — NOT required to run the Streamlit app.
+# Needed only for the two-stage classifier in models/ (training + inference),
+# the local retraining workflow (components/retraining.py), and the optional
+# OpenCV image-quality path. All of these are lazy-imported, so the core app
+# runs without anything in this file.
+#
+# Installing this also installs the core app (via -r below). torch CPU wheels
+# are served from the PyTorch index rather than PyPI:
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+-r requirements.txt
+
+torch==2.12.1
+torchvision==0.27.1
+opencv-python==4.13.0.92

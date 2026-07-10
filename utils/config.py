@@ -1,25 +1,13 @@
 # =========================================================================
 # STANDARD GLOBAL IMPORTS & CONFIGURATIONS (utils/config.py)
 # =========================================================================
-import streamlit as st
-import pandas as pd
-import folium
-from streamlit_folium import st_folium
-import plotly.express as px
 import os
-import io
-from datetime import datetime, timedelta
+
+import streamlit as st
 from dotenv import load_dotenv
-from supabase import create_client
+
 # Clean imports from the modern SDK
-from google import genai
-from google.genai import types
-import requests
-import numpy as np
-from PIL import Image
-from scipy.stats import norm
-import plotly.graph_objects as go
-import json
+from supabase import create_client
 
 from utils.logging_config import get_logger
 

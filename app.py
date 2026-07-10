@@ -1,13 +1,12 @@
 # =========================================================================
 # APPLICATION ENTRYPOINT ORCHESTRATOR (app.py)
 # =========================================================================
+
 import streamlit as st
-import pandas as pd
-import datetime
-from utils.theme import inject_global_theme
-from utils.navigation import render_sidebar_nav
+
 from utils.auth import restore_session
-from PIL import Image
+from utils.navigation import render_sidebar_nav
+from utils.theme import inject_global_theme
 
 # 1. Page Configuration
 st.set_page_config(
@@ -17,7 +16,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. Design System Foundation Injection 
+# 2. Design System Foundation Injection
 inject_global_theme()
 
 # 3. Dynamic UI Sub-Component Layout Imports (Banners, Sidebars, Footers)
@@ -27,7 +26,7 @@ except ImportError:
     try:
         from utils.ui_components import apply_custom_dashboard_theme as apply_theme
     except ImportError:
-        def apply_theme(): pass 
+        def apply_theme(): pass
 
 try:
     from utils.ui_components import render_institutional_sidebar_header as render_banner
@@ -35,32 +34,32 @@ except ImportError:
     try:
         from utils.ui_components import render_dashboard_banner as render_banner
     except ImportError:
-        def render_banner(): pass 
+        def render_banner(): pass
 
 try:
     from utils.ui_components import render_system_footer
 except ImportError:
-    def render_system_footer(): pass 
+    def render_system_footer(): pass
 
 # Execute additional structural layout themes
 apply_theme()
 
 # 4. Core Page Component Imports
-from components.login import render_login_page
-from components.dashboard import render_dashboard_page
-from components.site_log import render_site_log_page
-from components.diagnostics import render_diagnostics_page
-from components.environmental_trends import render_environmental_trends_page
-from components.copilot import render_copilot_page
-from components.predictions import render_predictions_page
-from components.forecasting import render_forecasting_page
-from components.correlation import render_correlation_page
-from components.profile import render_profile_page
-from components.lab_pcr import render_lab_pcr_page
 from components.bioassay_entry import render_bioassay_entry_page
 from components.clinical_case_entry import render_clinical_case_entry_page
-from components.retraining import render_retraining_page
+from components.copilot import render_copilot_page
+from components.correlation import render_correlation_page
+from components.dashboard import render_dashboard_page
+from components.diagnostics import render_diagnostics_page
+from components.environmental_trends import render_environmental_trends_page
+from components.forecasting import render_forecasting_page
+from components.lab_pcr import render_lab_pcr_page
+from components.login import render_login_page
+from components.predictions import render_predictions_page
+from components.profile import render_profile_page
 from components.reports import render_reports_page
+from components.retraining import render_retraining_page
+from components.site_log import render_site_log_page
 
 # ... (Keep your existing page configs and component imports completely identical)
 
@@ -109,10 +108,10 @@ def main():
     # Read active query parameter state directly from browser canvas location
     url_params = st.query_params
     query_page = url_params.get("page", "dashboard")
-    
+
     if query_page not in NAV_MAP:
         query_page = "dashboard"
-        
+
     current_active_page = NAV_MAP[query_page]
 
     # Render sidebar navigation
