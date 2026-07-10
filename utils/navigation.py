@@ -38,10 +38,28 @@ def render_sidebar_nav(active: str):
     empty state, which logged the user out on every tab click.
     """
     with st.sidebar:
-        # Left-align button labels so they read as nav items, not centered CTAs.
+        # Left-align the labels, and force readable label colors. The default
+        # secondary-button text rendered near-white on the light sidebar and was
+        # invisible until hover; pin inactive tabs to dark slate (teal on hover)
+        # while keeping the active teal-filled tab's label white.
         st.markdown(
-            "<style>section[data-testid='stSidebar'] .stButton button "
-            "{ justify-content: flex-start; font-weight: 600; }</style>",
+            """
+            <style>
+            section[data-testid="stSidebar"] .stButton > button {
+                justify-content: flex-start;
+                font-weight: 600;
+                color: #1e293b !important;
+            }
+            section[data-testid="stSidebar"] .stButton > button:hover {
+                color: #0d9488 !important;
+                border-color: #0d9488 !important;
+            }
+            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"],
+            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"]:hover {
+                color: #ffffff !important;
+            }
+            </style>
+            """,
             unsafe_allow_html=True,
         )
         st.markdown("Navigation")
