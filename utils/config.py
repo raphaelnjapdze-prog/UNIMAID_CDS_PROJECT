@@ -21,6 +21,10 @@ from scipy.stats import norm
 import plotly.graph_objects as go
 import json
 
+from utils.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 # 1. Look for and load local hidden .env file
 load_dotenv()
 
@@ -31,7 +35,7 @@ def get_secret(key: str, default=None):
             if secret_value:
                 return secret_value
         except Exception:
-            pass
+            logger.debug("st.secrets lookup for %r failed; falling back to env", key, exc_info=True)
     return os.getenv(key, default)
 
 # --- GLOBAL CREDENTIALS & SCM CONSTANTS ---

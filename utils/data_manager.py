@@ -34,6 +34,9 @@ from utils.auth import (
     get_current_user_email,
     get_current_user_id,
 )
+from utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # =============================================================================
 # COMPATIBILITY SHIMS — several pages still call these old names.
@@ -201,6 +204,7 @@ def supabase_table_exists() -> bool:
         client.table(SPECIMEN_TABLE).select("specimen_id").limit(1).execute()
         return True
     except Exception:
+        logger.debug("specimen_records existence probe failed", exc_info=True)
         return False
 
 
@@ -246,6 +250,7 @@ def attempt_create_supabase_table() -> bool:
         service.rpc("sql", {"sql": create_sql}).execute()
         return supabase_table_exists()
     except Exception:
+        logger.warning("Failed to create %s table via service RPC", SPECIMEN_TABLE, exc_info=True)
         return False
 # =============================================================================
 # SHARED GENUS EXTRACTION — single source of truth for turning a stored
@@ -323,6 +328,7 @@ def extract_primary_genus(field_screening_result) -> str | None:
         try:
             field_screening_result = json.loads(field_screening_result)
         except Exception:
+            logger.debug("Could not JSON-decode field_screening_result for genus extraction", exc_info=True)
             return None
     if not isinstance(field_screening_result, dict):
         return None

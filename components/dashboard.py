@@ -19,6 +19,9 @@ from streamlit_folium import st_folium
 from utils.icons import render_page_header
 from utils.auth import get_supabase_client
 from utils.data_manager import load_specimen_records, extract_primary_genus
+from utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 # ── Real data loading ─────────────────────────────────────────────────────
@@ -100,7 +103,7 @@ def _save_subscriber(email: str) -> bool:
             }).execute()
             return True
         except Exception:
-            pass  # fall through to local CSV
+            logger.warning("Subscriber insert to Supabase failed; falling back to local CSV", exc_info=True)
 
     try:
         subs_file = "data/subscribers.csv"
@@ -113,6 +116,7 @@ def _save_subscriber(email: str) -> bool:
             writer.writerow([_csv_safe(email), datetime.now().isoformat()])
         return True
     except Exception:
+        logger.exception("Failed to persist subscriber to local CSV fallback")
         return False
 
 
@@ -194,7 +198,7 @@ def render_dashboard_page():
             if acc is not None:
                 accuracy_display = f"{acc*100:.1f}% ({report['overall']['correct']}/{report['overall']['total_confirmed']})"
     except Exception:
-        pass
+        logger.debug("Accuracy summary unavailable for dashboard header", exc_info=True)
 
     kpi1, kpi2, kpi3, kpi4 = st.columns(4)
     kpi1.metric("Total Specimens Logged", f"{total_specimens:,}")

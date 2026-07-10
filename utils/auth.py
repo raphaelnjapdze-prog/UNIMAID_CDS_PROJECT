@@ -10,6 +10,9 @@ from utils.config import (
     ADMIN_EMAIL,
     ADMIN_PASSWORD
 )
+from utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 def get_supabase_client():
     """
@@ -29,7 +32,7 @@ def get_supabase_client():
             client.postgrest.auth(token)
             client.storage._client.headers["Authorization"] = f"Bearer {token}"
         except Exception:
-            pass
+            logger.debug("Failed to re-apply auth token to Supabase client", exc_info=True)
     return client
 
 
@@ -45,6 +48,7 @@ def supabase_user():
         user_response = client.auth.get_user()
         return getattr(user_response, "user", None) or user_response
     except Exception:
+        logger.debug("supabase_user() lookup failed", exc_info=True)
         return None
 
 
@@ -84,7 +88,7 @@ def sign_in_user(email: str, password: str):
             try:
                 client.auth.set_session(session.access_token, session.refresh_token)
             except Exception:
-                pass
+                logger.warning("Could not set Supabase session after sign-in", exc_info=True)
             # Persist tokens in session_state so they survive Streamlit reruns
             st.session_state["sb_access_token"] = session.access_token
             st.session_state["sb_refresh_token"] = session.refresh_token
@@ -182,7 +186,7 @@ def sign_out_user():
         try:
             client.auth.sign_out()
         except Exception:
-            pass
+            logger.debug("Supabase sign_out() call failed; clearing local state anyway", exc_info=True)
     _clear_auth_state()
     st.session_state["current_page"] = "dashboard"
 

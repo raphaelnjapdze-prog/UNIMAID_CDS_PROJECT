@@ -16,6 +16,9 @@ import datetime
 import pandas as pd
 from PIL import Image
 from utils.auth import sign_out_user
+from utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 COLORS = {
@@ -165,10 +168,10 @@ def _get_live_stats():
             if acc is not None:
                 stats["ai_accuracy"] = f"{acc*100:.1f}%"
         except Exception:
-            pass
+            logger.debug("AI accuracy stat unavailable for profile", exc_info=True)
 
     except Exception:
-        pass
+        logger.debug("Could not load profile specimen stats", exc_info=True)
     return stats
 
 
@@ -182,7 +185,7 @@ def _get_user_submissions(current_user_id):
         if resp.data:
             return pd.DataFrame(resp.data)
     except Exception:
-        pass
+        logger.debug("Could not load user submissions", exc_info=True)
     return None
 
 
@@ -246,7 +249,7 @@ def render_profile_page():
                 encoded = base64.b64encode(f.read()).decode()
             avatar_html = f'<img src="data:image/png;base64,{encoded}" class="avatar-image">'
         except Exception:
-            pass
+            logger.debug("Avatar image could not be rendered; using placeholder", exc_info=True)
     if not avatar_html:
         avatar_html = initials_avatar(p_data["full_name"])
 
