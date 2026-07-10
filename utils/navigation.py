@@ -40,15 +40,15 @@ def render_sidebar_nav(active: str):
     with st.sidebar:
         # Left-align the labels, and force readable label colors. The default
         # secondary-button text rendered near-white on the light sidebar and was
-        # invisible until hover; pin inactive tabs to a neutral grey (teal on
-        # hover) while keeping the active teal-filled tab's label white.
+        # invisible until hover; pin inactive tabs to bold, near-black text (teal
+        # on hover) while keeping the active teal-filled tab's label white.
         st.markdown(
             """
             <style>
             section[data-testid="stSidebar"] .stButton > button {
                 justify-content: flex-start;
-                font-weight: 600;
-                color: #4b5563 !important;
+                font-weight: 700;
+                color: #111827 !important;
             }
             section[data-testid="stSidebar"] .stButton > button:hover {
                 color: #0d9488 !important;
