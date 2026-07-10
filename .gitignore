@@ -1,0 +1,41 @@
+# ── Python ────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# ── Virtual environments ─────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets & local config (NEVER commit) ────────────────
+.streamlit/secrets.toml
+.env
+.env.*
+!.env.example
+
+# ── Streamlit ────────────────────────────────────────────
+.streamlit/config.toml.local
+
+# ── App-generated data & artifacts ───────────────────────
+data/subscribers.csv
+uploaded_field_sheets/
+debug_*.txt
+*.log
+
+# ── Trained model weights (large binaries) ───────────────
+*.pkl
+*.pth
+*.pt
+
+# ── OS / editor cruft ────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -92,7 +92,13 @@ def sign_in_user(email: str, password: str):
 
         return auth_response
 
-    if (email.strip().lower() == ADMIN_USERNAME or email.strip().lower() == ADMIN_EMAIL.lower()) and password == ADMIN_PASSWORD:
+    # Local fallback login is only available when an admin password has been
+    # configured via secrets/env. Without it, there is no offline bypass.
+    if (
+        ADMIN_PASSWORD
+        and password == ADMIN_PASSWORD
+        and email.strip().lower() in (ADMIN_USERNAME.lower(), ADMIN_EMAIL.lower())
+    ):
         return {"user": {"email": ADMIN_EMAIL, "id": "local-admin", "user_metadata": {"full_name": "Administrator"}}}
     return None
 

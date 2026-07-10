@@ -50,9 +50,12 @@ SUPABASE_SERVICE_CLIENT = (
 UPLOAD_DIR = "uploaded_field_sheets"
 
 # --- LOCAL FALLBACK AUTHENTICATION CREDENTIAL SETTINGS ---
-ADMIN_USERNAME = "raphael"
-ADMIN_EMAIL = "raphael@unimaid.edu.ng"
-ADMIN_PASSWORD = "unimaid_ivm_2026"
+# Credentials must be supplied via secrets/env — never hardcoded. If
+# ADMIN_PASSWORD is unset, the local-admin fallback login is disabled and
+# only Supabase authentication is available.
+ADMIN_USERNAME = get_secret("ADMIN_USERNAME", "admin")
+ADMIN_EMAIL = get_secret("ADMIN_EMAIL", "admin@localhost")
+ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD")
 
 # Ensure upload directory exists right away
 if not os.path.exists(UPLOAD_DIR):
