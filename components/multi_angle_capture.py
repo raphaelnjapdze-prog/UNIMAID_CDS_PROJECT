@@ -10,14 +10,13 @@ from __future__ import annotations
 
 import io
 import json
-import uuid
-from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import streamlit as st
 from PIL import Image
 
+from utils.data_manager import submit_multi_angle_capture_entry
 from utils.image_quality_control import assess_image_quality
 
 ANGLE_CONFIG: List[Dict[str, Any]] = [
@@ -74,20 +73,6 @@ ANGLE_CONFIG: List[Dict[str, Any]] = [
         "diagram": "   [head]\n  /  |  \\\n [palps]\n",
     },
 ]
-
-
-@dataclass
-class SpecimenCaptureRecord:
-    """Structured record produced for downstream classification workflows."""
-
-    specimen_id: str
-    captured_at: str
-    collector_id: str
-    gps_coordinates: Optional[str]
-    angles: Dict[str, Dict[str, Any]]
-
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
 
 
 def _initialize_state() -> Dict[str, Any]:
@@ -152,34 +137,45 @@ def _reset_flow() -> None:
     _initialize_state()
 
 
-def _build_record() -> Dict[str, Any]:
-    state = _initialize_state()
-    collector_id = st.session_state.get("capture_collector_id", "").strip() or "unknown"
-    gps_coordinates = st.session_state.get("capture_gps_coordinates", "").strip() or None
+def _parse_gps(text: Optional[str]) -> tuple[Optional[float], Optional[float]]:
+    """Parse a "lat, lon" string into floats; returns (None, None) if unparseable."""
+    parts = (text or "").replace(";", ",").split(",")
+    if len(parts) == 2:
+        try:
+            return float(parts[0].strip()), float(parts[1].strip())
+        except ValueError:
+            return None, None
+    return None, None
 
-    angles: Dict[str, Dict[str, Any]] = {}
-    for angle in ANGLE_CONFIG:
-        angle_key = angle["key"]
-        image_payload = state["images"].get(angle_key)
-        status = state["statuses"].get(angle_key, "pending")
-        angles[angle_key] = {
-            "status": status,
-            "filename": image_payload.get("filename") if image_payload else None,
-            "mime_type": image_payload.get("mime_type") if image_payload else None,
-            "captured_at": image_payload.get("captured_at") if image_payload else None,
-            "image_bytes": image_payload.get("bytes") if image_payload else None,
-        }
 
-    record = SpecimenCaptureRecord(
-        specimen_id=str(uuid.uuid4()),
-        captured_at=datetime.now(timezone.utc).isoformat(),
-        collector_id=collector_id,
-        gps_coordinates=gps_coordinates,
-        angles=angles,
+def _persist_capture(state: Dict[str, Any]) -> None:
+    """
+    Upload the captured angle images and insert a specimen_records row via the
+    data layer, then report honestly. On failure the data layer already
+    surfaces the specific error, so this just stops.
+    """
+    gps_lat, gps_lon = _parse_gps(st.session_state.get("capture_gps_coordinates", ""))
+    row = submit_multi_angle_capture_entry(
+        angle_images=state["images"],
+        statuses=state["statuses"],
+        gps_lat=gps_lat,
+        gps_lon=gps_lon,
+        field_collector_label=st.session_state.get("capture_collector_id", "").strip(),
     )
-    state["last_record"] = record.to_dict()
+    if row is None:
+        return
+
+    state["last_record"] = row
     state["submitted"] = True
-    return state["last_record"]
+    st.session_state["last_submitted_record"] = row
+    st.success("Specimen record saved to the surveillance ledger.")
+    st.json(row, expanded=False)
+    st.download_button(
+        label="Download specimen JSON",
+        data=json.dumps(row, indent=2, default=str),
+        file_name=f"specimen_{row.get('specimen_id')}.json",
+        mime="application/json",
+    )
 
 
 def _render_angle_step(angle: Dict[str, Any]) -> None:
@@ -256,8 +252,14 @@ def _render_summary() -> None:
     st.text_input("GPS coordinates (optional)", key="capture_gps_coordinates")
 
     if st.button("Submit specimen record", type="primary"):
-        # Run image quality checks for each captured angle before finalizing submission
         state = _initialize_state()
+
+        captured = [a["key"] for a in ANGLE_CONFIG if state["statuses"].get(a["key"]) == "captured"]
+        if not captured:
+            st.warning("Capture at least one angle before submitting.")
+            return
+
+        # Run image quality checks for each captured angle before finalizing submission
         failures: List[Dict[str, str]] = []
         for angle in ANGLE_CONFIG:
             angle_key = angle["key"]
@@ -278,31 +280,12 @@ def _render_summary() -> None:
                 st.write(f"- {f['title']}: {f['reason']}")
                 if st.button(f"Retake {f['title']}", key=f"retake_{f['angle_key']}"):
                     # jump to the angle's step for recapture
-                    target_index = next((i for i,a in enumerate(ANGLE_CONFIG) if a['key']==f['angle_key']), 0)
-                    state["current_step"] = target_index
+                    state["current_step"] = next((i for i, a in enumerate(ANGLE_CONFIG) if a["key"] == f["angle_key"]), 0)
                     st.rerun()
             if st.button("Force submit anyway (not recommended)", key="force_submit"):
-                record = _build_record()
-                st.session_state["last_submitted_record"] = record
-                st.success("Specimen record created (forced).")
-                st.json(record, expanded=False)
-                st.download_button(
-                    label="Download specimen JSON",
-                    data=json.dumps(record, indent=2),
-                    file_name=f"specimen_{record['specimen_id']}.json",
-                    mime="application/json",
-                )
+                _persist_capture(state)
         else:
-            record = _build_record()
-            st.session_state["last_submitted_record"] = record
-            st.success("Specimen record created successfully.")
-            st.json(record, expanded=False)
-            st.download_button(
-                label="Download specimen JSON",
-                data=json.dumps(record, indent=2),
-                file_name=f"specimen_{record['specimen_id']}.json",
-                mime="application/json",
-            )
+            _persist_capture(state)
 
     if st.button("Start over"):
         _reset_flow()

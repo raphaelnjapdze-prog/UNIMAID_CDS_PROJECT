@@ -40,26 +40,41 @@ logger = get_logger(__name__)
 # =============================================================================
 # SPECIMEN PHOTO UPLOAD
 # =============================================================================
+def _upload_photo_bytes(
+    file_bytes: bytes, specimen_id: str, ext: str = "jpg", content_type: str = "image/jpeg"
+) -> str | None:
+    """
+    Uploads raw image bytes to the specimen-photos Supabase Storage bucket and
+    returns its public URL, or None on failure. Shared by the file-upload and
+    multi-angle (in-memory bytes) capture paths so both hit the same bucket.
+    """
+    client = get_supabase_client()
+    if client is None or not file_bytes:
+        return None
+    try:
+        path = f"{specimen_id}/{uuid.uuid4()}.{ext}"
+        client.storage.from_("specimen-photos").upload(
+            path, file_bytes, {"content-type": content_type or "image/jpeg"}
+        )
+        return client.storage.from_("specimen-photos").get_public_url(path)
+    except Exception as e:
+        logger.warning("Photo upload to specimen-photos failed", exc_info=True)
+        st.warning(f"Photo upload failed, entry will be saved without it: {e}")
+        return None
+
+
 def upload_specimen_photo(uploaded_file, specimen_id: str) -> str | None:
     """
     Uploads a field photo to the specimen-photos Supabase Storage bucket and
     returns its public URL. Returns None on failure — caller must warn the
     user, not silently drop the photo.
     """
-    client = get_supabase_client()
-    if client is None or uploaded_file is None:
+    if uploaded_file is None:
         return None
-    try:
-        file_bytes = uploaded_file.getvalue()
-        ext = uploaded_file.name.split(".")[-1] if "." in uploaded_file.name else "jpg"
-        path = f"{specimen_id}/{uuid.uuid4()}.{ext}"
-        client.storage.from_("specimen-photos").upload(
-            path, file_bytes, {"content-type": uploaded_file.type or "image/jpeg"}
-        )
-        return client.storage.from_("specimen-photos").get_public_url(path)
-    except Exception as e:
-        st.warning(f"Photo upload failed, entry will be saved without it: {e}")
-        return None
+    ext = uploaded_file.name.split(".")[-1] if "." in uploaded_file.name else "jpg"
+    return _upload_photo_bytes(
+        uploaded_file.getvalue(), specimen_id, ext, uploaded_file.type or "image/jpeg"
+    )
 
 
 # =============================================================================
@@ -119,9 +134,95 @@ def submit_site_log_entry(
 
     try:
         response = client.table("specimen_records").insert(record).execute()
+        clear_specimen_records_cache()
         return response.data[0] if response.data else None
     except Exception as e:
+        logger.exception("Could not save site log entry")
         st.error(f"Could not save site log entry: {e}")
+        return None
+
+
+def submit_multi_angle_capture_entry(
+    angle_images: dict,
+    statuses: dict | None = None,
+    gps_lat: float | None = None,
+    gps_lon: float | None = None,
+    field_collector_label: str = "",
+    collection_date: date | None = None,
+) -> dict | None:
+    """
+    Persists a multi-angle specimen capture to specimen_records: uploads each
+    captured angle image to the specimen-photos bucket and inserts one row
+    tagged screening_method="multi_angle_capture".
+
+    This is a raw image capture, not a species identification — like
+    manual_field_log it deliberately carries no genus claim, so it stays out of
+    genus/accuracy reporting (extract_primary_genus / extract_genus_counts do
+    not match this method).
+
+    `angle_images` maps angle_key -> {"bytes", "filename", "mime_type",
+    "captured_at"}; `statuses` maps angle_key -> "captured"/"not_captured"/
+    "pending". Returns the inserted row on success, or None if Supabase isn't
+    configured or the insert failed — the caller must show an honest error.
+    """
+    client = get_supabase_client()
+    if client is None:
+        st.error("Supabase is not configured — this capture cannot be saved.")
+        return None
+
+    statuses = statuses or {}
+    specimen_id = str(uuid.uuid4())
+    photo_urls: list[str] = []
+    angle_records: dict[str, dict] = {}
+
+    # Record every angle's status; upload images only for captured ones.
+    angle_keys = list(statuses.keys()) or list((angle_images or {}).keys())
+    for angle_key in angle_keys:
+        payload = (angle_images or {}).get(angle_key) or {}
+        image_bytes = payload.get("bytes")
+        photo_url = None
+        if image_bytes:
+            filename = payload.get("filename") or f"{angle_key}.jpg"
+            ext = filename.split(".")[-1] if "." in filename else "jpg"
+            photo_url = _upload_photo_bytes(
+                image_bytes, specimen_id, ext, payload.get("mime_type") or "image/jpeg"
+            )
+            if photo_url:
+                photo_urls.append(photo_url)
+        angle_records[angle_key] = {
+            "status": statuses.get(angle_key, "captured" if image_bytes else "pending"),
+            "filename": payload.get("filename"),
+            "captured_at": payload.get("captured_at"),
+            "photo_url": photo_url,
+        }
+
+    record = {
+        "specimen_id": specimen_id,
+        "collection_date": (collection_date or date.today()).isoformat(),
+        "collector_id": get_current_user_id(),
+        "gps_lat": gps_lat,
+        "gps_lon": gps_lon,
+        "breeding_site_type": None,
+        "photo_urls": photo_urls,
+        "field_screening_result": {
+            "screening_method": "multi_angle_capture",
+            "result": {
+                "angles": angle_records,
+                "angles_captured": [k for k, r in angle_records.items() if r["photo_url"]],
+                "field_collector_label": field_collector_label or None,
+            },
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        },
+        "pcr_status": "not_submitted",
+    }
+
+    try:
+        response = client.table("specimen_records").insert(record).execute()
+        clear_specimen_records_cache()
+        return response.data[0] if response.data else None
+    except Exception as e:
+        logger.exception("Could not save multi-angle capture")
+        st.error(f"Could not save specimen capture: {e}")
         return None
 
 
