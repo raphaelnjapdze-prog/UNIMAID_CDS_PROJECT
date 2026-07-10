@@ -55,6 +55,7 @@ from components.environmental_trends import render_environmental_trends_page
 from components.forecasting import render_forecasting_page
 from components.lab_pcr import render_lab_pcr_page
 from components.login import render_login_page
+from components.multi_angle_capture import render_multi_angle_capture_page
 from components.predictions import render_predictions_page
 from components.profile import render_profile_page
 from components.reports import render_reports_page
@@ -80,6 +81,7 @@ NAV_MAP = {
     "dashboard": "Surveillance Dashboard",
     "log":       "Site Log Entry",
     "ai":        "Advanced AI Diagnostics",
+    "capture":   "Multi-Angle Capture",
     "trends":    "Global Change Trends",
     "copilot":   "WHO Entomology AI Copilot",
     "forecaster": "Historical Trends",
@@ -127,6 +129,8 @@ def main():
         render_site_log_page()
     elif current_active_page == "Advanced AI Diagnostics":
         render_diagnostics_page()
+    elif current_active_page == "Multi-Angle Capture":
+        render_multi_angle_capture_page()
     elif current_active_page == "Global Change Trends":
         render_environmental_trends_page()
     elif current_active_page == "WHO Entomology AI Copilot":

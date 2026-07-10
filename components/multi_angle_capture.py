@@ -259,7 +259,7 @@ def _render_summary() -> None:
         # Run image quality checks for each captured angle before finalizing submission
         state = _initialize_state()
         failures: List[Dict[str, str]] = []
-        for idx, angle in enumerate(ANGLE_CONFIG):
+        for angle in ANGLE_CONFIG:
             angle_key = angle["key"]
             if state["statuses"].get(angle_key) == "captured":
                 payload = state["images"].get(angle_key)
@@ -333,6 +333,11 @@ def render_multi_angle_capture_component() -> Optional[Dict[str, Any]]:
         st.info("The last submitted record is available in session state for downstream use.")
 
     return state.get("last_record")
+
+
+def render_multi_angle_capture_page() -> None:
+    """Page entry point used by the app router (see app.py NAV_MAP)."""
+    render_multi_angle_capture_component()
 
 
 if __name__ == "__main__":
