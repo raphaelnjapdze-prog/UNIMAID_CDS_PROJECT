@@ -46,10 +46,14 @@ def render_sidebar_nav(active: str):
         st.markdown(
             """
             <style>
-            /* Text/icon color — target the button and every descendant. */
+            /* Text/icon color — target the button and every descendant.
+               -webkit-text-fill-color is set too: it overrides `color` on the
+               rendered glyphs, so `color` alone can leave the label its default
+               (near-white) shade. */
             section[data-testid="stSidebar"] .stButton > button,
             section[data-testid="stSidebar"] .stButton > button * {
                 color: #111827 !important;
+                -webkit-text-fill-color: #111827 !important;
                 fill: #111827 !important;
             }
             /* Shape + fill on the button element only. */
@@ -67,6 +71,7 @@ def render_sidebar_nav(active: str):
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"],
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] * {
                 color: #ffffff !important;
+                -webkit-text-fill-color: #ffffff !important;
                 fill: #ffffff !important;
             }
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
