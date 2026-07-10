@@ -40,29 +40,40 @@ def render_sidebar_nav(active: str):
     with st.sidebar:
         # Left-align the labels and give every tab a sky-blue fill: inactive tabs
         # get a light sky blue with bold near-black text; the active tab gets a
-        # deeper sky blue with white text so it still stands out.
+        # deeper sky blue with white text so it still stands out. Color is forced
+        # on the button AND its inner nodes (label <p> + icon), because Streamlit
+        # nests the label in a child element that overrides a button-only color.
         st.markdown(
             """
             <style>
+            /* Text/icon color — target the button and every descendant. */
+            section[data-testid="stSidebar"] .stButton > button,
+            section[data-testid="stSidebar"] .stButton > button * {
+                color: #111827 !important;
+                fill: #111827 !important;
+            }
+            /* Shape + fill on the button element only. */
             section[data-testid="stSidebar"] .stButton > button {
                 justify-content: flex-start;
                 font-weight: 700;
-                color: #111827 !important;
                 background-color: #87ceeb !important;
                 border-color: #6cb8dd !important;
             }
             section[data-testid="stSidebar"] .stButton > button:hover {
-                color: #111827 !important;
                 background-color: #6cb8dd !important;
                 border-color: #4aa3cf !important;
             }
-            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
+            /* Active tab: deeper blue with white label + icon. */
+            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"],
+            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] * {
                 color: #ffffff !important;
+                fill: #ffffff !important;
+            }
+            section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
                 background-color: #0ea5e9 !important;
                 border-color: #0284c7 !important;
             }
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"]:hover {
-                color: #ffffff !important;
                 background-color: #0284c7 !important;
                 border-color: #0284c7 !important;
             }
