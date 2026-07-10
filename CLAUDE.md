@@ -29,7 +29,9 @@ If Supabase is not configured, the app must degrade honestly: data-layer functio
 ## Architecture
 
 ### SPA routing (`app.py`)
-The app is a single-page application driven by URL query params, not Streamlit multipage. `app.py::main()` reads `?page=<key>`, maps it through `NAV_MAP` to a page name, and calls the matching `render_*_page()` from `components/`. Navigation links (`utils/navigation.py`) always append `&session=active`; this flag is the session-persistence bridge that keeps `st.session_state["authenticated"]` true across Streamlit hot-reloads. To add a page: create `components/<x>.py` with a `render_<x>_page()`, import it in `app.py`, add an entry to `NAV_MAP`, and add a nav item in `utils/navigation.py`.
+The app is a single-page application driven by URL query params, not Streamlit multipage. `app.py::main()` reads `?page=<key>`, maps it through `NAV_MAP` to a page name, and calls the matching `render_*_page()` from `components/`. To add a page: create `components/<x>.py` with a `render_<x>_page()`, import it in `app.py`, add an entry to `NAV_MAP`, and add a nav item in `utils/navigation.py`.
+
+Auth is gated in `main()`: a page renders only if `st.session_state["authenticated"]` (or `guest_explorer`) is set. That flag is set **only** by a real login or by `utils.auth.restore_session()`, which re-validates the stored Supabase tokens against the auth server. There is deliberately no URL-based session flag — the old `?session=active` mechanism was an auth bypass and has been removed. Because `st.session_state` doesn't survive a full browser reload, a reload currently drops the user to the login screen; cross-reload persistence would require storing the refresh token in a cookie/localStorage (not yet implemented).
 
 ### Layers
 - `components/` — one file per page, each exposing a `render_*_page()`. UI only; delegates data/logic to `utils/`.

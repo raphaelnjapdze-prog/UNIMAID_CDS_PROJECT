@@ -114,13 +114,8 @@ def sign_up_user(email: str, password: str, full_name: str):
     return None
 
 
-def sign_out_user():
-    client = SUPABASE_CLIENT if SUPABASE_ENABLED else None
-    if client:
-        try:
-            client.auth.sign_out()
-        except Exception:
-            pass
+def _clear_auth_state():
+    """Resets all auth-related session_state to a clean logged-out state."""
     st.session_state["authenticated"] = False
     st.session_state["guest_explorer"] = False
     st.session_state["auth_provider"] = "local"
@@ -129,6 +124,66 @@ def sign_out_user():
     st.session_state["auth_user_name"] = None
     st.session_state["sb_access_token"] = None
     st.session_state["sb_refresh_token"] = None
+
+
+def restore_session() -> bool:
+    """
+    Re-establishes an authenticated session from tokens previously persisted
+    in st.session_state — but ONLY after verifying them against Supabase.
+
+    This replaces the old `?session=active` URL flag, which set
+    authenticated=True with no credential check at all, letting anyone in by
+    editing the address bar. Here, access is granted only if Supabase
+    confirms the refresh token still maps to a valid user: an expired access
+    token is transparently refreshed, and a revoked/invalid token forces a
+    clean logged-out state.
+
+    Note: st.session_state does not survive a full browser reload, so the
+    tokens it holds are per-session. This restores auth across Streamlit
+    reruns within a session; it does not (by design) grant access from a URL
+    alone. Cross-reload persistence would require storing the refresh token
+    in a cookie/localStorage, which is a separate, opt-in change.
+
+    Returns True if a valid session was restored.
+    """
+    if not SUPABASE_ENABLED:
+        return False
+
+    access_token = st.session_state.get("sb_access_token")
+    refresh_token = st.session_state.get("sb_refresh_token")
+    if not access_token or not refresh_token:
+        return False
+
+    try:
+        auth_response = SUPABASE_CLIENT.auth.set_session(access_token, refresh_token)
+    except Exception:
+        # Refresh token invalid, expired, or revoked — deny and reset.
+        _clear_auth_state()
+        return False
+
+    user = getattr(auth_response, "user", None)
+    if user is None:
+        _clear_auth_state()
+        return False
+
+    # Persist any rotated tokens so the next validation uses the latest pair.
+    session = getattr(auth_response, "session", None)
+    if session is not None:
+        st.session_state["sb_access_token"] = getattr(session, "access_token", access_token)
+        st.session_state["sb_refresh_token"] = getattr(session, "refresh_token", refresh_token)
+
+    set_authenticated(user, provider="supabase")
+    return True
+
+
+def sign_out_user():
+    client = SUPABASE_CLIENT if SUPABASE_ENABLED else None
+    if client:
+        try:
+            client.auth.sign_out()
+        except Exception:
+            pass
+    _clear_auth_state()
     st.session_state["current_page"] = "dashboard"
 
     if "session" in st.query_params:

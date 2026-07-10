@@ -6,6 +6,7 @@ import pandas as pd
 import datetime
 from utils.theme import inject_global_theme
 from utils.navigation import render_sidebar_nav
+from utils.auth import restore_session
 from PIL import Image
 
 # 1. Page Configuration
@@ -63,15 +64,17 @@ from components.reports import render_reports_page
 
 # ... (Keep your existing page configs and component imports completely identical)
 
-# 5. Session State Architecture Initialization & Hard-Reload Bridge
+# 5. Session State Initialization & Verified Session Restore
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
 if "guest_explorer" not in st.session_state:
     st.session_state["guest_explorer"] = False
 
-#  SECURITY STATE BRIDGE: Intercept parameters prior to loading the login gate canvas
-if st.query_params.get("session") == "active":
-    st.session_state["authenticated"] = True
+# Restore a prior session ONLY by re-validating the stored Supabase tokens
+# against the auth server — never by trusting a URL flag. See
+# utils.auth.restore_session for the security rationale.
+if not st.session_state["authenticated"] and not st.session_state["guest_explorer"]:
+    restore_session()
 
 # Reverse mapping configuration linking URL keys directly to functional names
 NAV_MAP = {
@@ -95,10 +98,6 @@ def main():
     if not st.session_state["authenticated"] and not st.session_state["guest_explorer"]:
         render_login_page()
         return
-
-    # If the user is logged in natively, ensure the URL contains the session keeper flag
-    if st.session_state["authenticated"] and st.query_params.get("session") != "active":
-        st.query_params["session"] = "active"
 
     # Add system title header
     st.markdown("""
