@@ -29,7 +29,6 @@ import pandas as pd
 import streamlit as st
 
 from utils.auth import (
-    get_current_user_email,
     get_current_user_id,
     get_supabase_client,
     get_supabase_service_client,
@@ -39,44 +38,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # =============================================================================
-# COMPATIBILITY SHIMS — several pages still call these old names.
-# These redirect to the real, current implementation rather than the deleted
-# fabricated versions. IMPORTANT: this only fixes the ImportError. Pages
-# built against the old schema (Base_Larval_Count, Temperature_C,
-# Satellite_LST, etc.) will still get a DataFrame with none of those
-# columns — they need individual review, not just this shim.
-# =============================================================================
-def _load_master_df():
-    return load_specimen_records()
-
-
-def _current_user_display_name() -> str:
-    from utils.auth import get_display_name
-    return get_display_name()
-
-
-def _current_user_security_notice():
-    from utils.auth import get_supabase_client
-    if get_supabase_client() is not None:
-        st.success("Connected to Supabase — row-level security active for your account.")
-    else:
-        st.warning("Running without a Supabase connection. Data is not being persisted centrally.")
-# =============================================================================
-# 1. IDENTITY — thin passthrough, no duplicate logic
-# =============================================================================
-# utils.auth is the single source of truth for identity. Re-exported here
-# only so existing call sites that import from utils.data_manager don't
-# break; new code should import directly from utils.auth.
-def get_current_user_email_():
-    return get_current_user_email()
-
-
-def get_current_user_id_():
-    return get_current_user_id()
-
-
-# =============================================================================
-# 2. SPECIMEN PHOTO UPLOAD
+# SPECIMEN PHOTO UPLOAD
 # =============================================================================
 def upload_specimen_photo(uploaded_file, specimen_id: str) -> str | None:
     """
