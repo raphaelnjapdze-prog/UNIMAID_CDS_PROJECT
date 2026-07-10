@@ -3,23 +3,27 @@
 # =========================================================================
 import streamlit as st
 
-# Page registry: (query-param id, label, icon emoji)
+# Page registry: (query-param id, label, Material Symbols icon).
+# Material icons are crisp vector glyphs (same line-art spirit as the original
+# Lucide SVGs); Streamlit renders them on native buttons via the :material/...:
+# syntax. Custom SVG can't go on a native button, so this is the closest look
+# that keeps the in-session (no page reload) navigation.
 _PAGES = [
-    ("dashboard", "Command Center", "🧭"),
-    ("log", "Site Log Entry", "📝"),
-    ("ai", "AI Diagnostics", "🔬"),
-    ("capture", "Multi-Angle Capture", "📸"),
-    ("trends", "Change Trends", "📈"),
-    ("copilot", "AI Copilot", "🤖"),
-    ("forecaster", "Seasonal Forecast", "📅"),
-    ("risk", "Risk Engine", "🚨"),
-    ("correlation", "Correlations", "🔗"),
-    ("lab", "PCR Lab", "🧪"),
-    ("bioassay", "Bioassay Entry", "🧫"),
-    ("case_entry", "Clinical Case Entry", "📋"),
-    ("retraining", "Retraining", "🔁"),
-    ("reports", "Reports", "📄"),
-    ("profile", "Profile", "👤"),
+    ("dashboard", "Command Center", ":material/dashboard:"),
+    ("log", "Site Log Entry", ":material/edit_note:"),
+    ("ai", "AI Diagnostics", ":material/biotech:"),
+    ("capture", "Multi-Angle Capture", ":material/photo_camera:"),
+    ("trends", "Change Trends", ":material/trending_up:"),
+    ("copilot", "AI Copilot", ":material/smart_toy:"),
+    ("forecaster", "Seasonal Forecast", ":material/calendar_month:"),
+    ("risk", "Risk Engine", ":material/warning:"),
+    ("correlation", "Correlations", ":material/hub:"),
+    ("lab", "PCR Lab", ":material/science:"),
+    ("bioassay", "Bioassay Entry", ":material/vaccines:"),
+    ("case_entry", "Clinical Case Entry", ":material/clinical_notes:"),
+    ("retraining", "Retraining", ":material/model_training:"),
+    ("reports", "Reports", ":material/description:"),
+    ("profile", "Profile", ":material/account_circle:"),
 ]
 
 
@@ -43,12 +47,12 @@ def render_sidebar_nav(active: str):
         st.markdown("Navigation")
         st.markdown("---")
 
-        for key, label, emoji in _PAGES:
+        for key, label, icon_name in _PAGES:
             is_active = key == active
             clicked = st.button(
                 label,
                 key=f"nav_{key}",
-                icon=emoji,
+                icon=icon_name,
                 use_container_width=True,
                 type="primary" if is_active else "secondary",
             )
