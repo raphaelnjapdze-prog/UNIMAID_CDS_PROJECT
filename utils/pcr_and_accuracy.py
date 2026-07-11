@@ -19,11 +19,16 @@ import qrcode
 import streamlit as st
 from supabase import Client
 
+from utils.logging_config import get_logger
+from utils.morphology_keys import complex_membership_by_trigger
+
 try:
     from utils.config import get_base_supabase_client
 except Exception:  # pragma: no cover - fallback for local use
     def get_base_supabase_client():
         return None
+
+logger = get_logger(__name__)
 
 
 def generate_qr_code_image(specimen_id: str, box_size: int = 10, border: int = 4) -> bytes:
@@ -36,6 +41,42 @@ def generate_qr_code_image(specimen_id: str, box_size: int = 10, border: int = 4
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def render_specimen_qr(
+    specimen_id: Any,
+    *,
+    caption: Optional[str] = None,
+    key: Optional[str] = None,
+    width: int = 180,
+) -> None:
+    """Render a specimen's QR label in Streamlit: the QR image plus a PNG
+    download button so the label can be printed and stuck on the physical tube.
+
+    This is the single UI entry point for specimen QR codes — used at capture
+    time (site log / diagnostics saves), on lab lookup, and for reprinting from
+    the specimen list. All of them link the physical specimen back to this exact
+    database row, which is what makes PCR confirmation possible.
+    """
+    if not specimen_id:
+        st.caption("No specimen ID available for a QR label.")
+        return
+    try:
+        png = generate_qr_code_image(str(specimen_id))
+    except Exception:
+        logger.warning("QR generation failed for specimen %s", specimen_id, exc_info=True)
+        st.caption("Could not generate a QR code for this specimen.")
+        return
+
+    st.image(png, caption=caption or f"Specimen {specimen_id}", width=width)
+    st.download_button(
+        "⬇ Download QR label (PNG)",
+        data=png,
+        file_name=f"specimen_{specimen_id}.png",
+        mime="image/png",
+        key=key or f"qr_dl_{specimen_id}",
+        use_container_width=True,
+    )
 
 
 def get_supabase_client() -> Optional[Client]:
@@ -82,7 +123,13 @@ def render_pcr_confirmation_form() -> None:
             return
 
         st.success(f"Loaded specimen {record['specimen_id']}")
-        st.json(record)
+
+        detail_col, qr_col = st.columns([3, 1])
+        with detail_col:
+            st.json(record)
+        with qr_col:
+            st.markdown("**Specimen label**")
+            render_specimen_qr(record["specimen_id"], key="qr_pcr_lookup")
 
         with st.form("pcr_confirmation_form"):
             st.write("### PCR confirmation details")
@@ -141,6 +188,14 @@ def _extract_predicted_label(field_screening_result: Dict[str, Any]) -> Optional
         return result.get("best_match") or result.get("genus")
 
     if method == "manual_checklist":
+        # Anopheles deep-key engine (character scoring or couplet key) resolves a
+        # rich taxon — "An. gambiae complex", "Anopheles pharoensis", etc. Prefer
+        # that over the bare genus so accuracy credits complex/species precision
+        # rather than scoring every deep-key call as genus-level "Anopheles".
+        deep = result.get("anopheles_deep_key") or result.get("anopheles_couplet_key")
+        if deep and deep.get("taxon"):
+            return deep["taxon"]
+
         # Adult checklist: prefer the top species/complex candidate if the
         # user ticked enough markers to narrow past genus; fall back to
         # genus_triage if no candidates matched.
@@ -165,37 +220,77 @@ def _extract_predicted_label(field_screening_result: Dict[str, Any]) -> Optional
     return result.get("predicted_complex") or result.get("complex") or result.get("group")
 
 
+# Cryptic-complex / species-group membership, keyed by the trigger word that
+# appears in a complex/group prediction label (e.g. "An. gambiae complex" ->
+# "gambiae"). A prediction naming one of these complexes/groups is scored
+# correct against ANY member, because morphology (and the deep key) genuinely
+# cannot split the complex to species — only PCR can.
+#
+# The membership data itself is owned by utils.morphology_keys.SPECIES_COMPLEXES
+# (the single source of truth, also used by the deep-key engine). We derive the
+# trigger->members map from there so PCR scoring and the identification engine
+# can never drift out of sync.
+COMPLEX_MEMBERSHIP = complex_membership_by_trigger()
+
+_GENERA = {"anopheles", "culex", "aedes"}
+
+
+def _norm(label: Any) -> str:
+    return str(label or "").strip().lower()
+
+
+def _pure_genus(label_lower: str) -> Optional[str]:
+    """Return the genus if `label_lower` is a genus-only call (e.g. "anopheles",
+    "anopheles spp."), else None. A genus-only prediction is honestly correct
+    against any confirmed species of that genus, but a species/complex label is
+    NOT genus-only and must be matched more strictly."""
+    tokens = [t for t in label_lower.replace(".", " ").split() if t not in ("sp", "spp")]
+    if len(tokens) == 1 and tokens[0] in _GENERA:
+        return tokens[0]
+    return None
+
+
+def _complex_members_for(label_lower: str) -> Optional[list[str]]:
+    """If the prediction names a known cryptic complex/group, return its member
+    epithets; else None. Detected by the presence of the complex trigger word
+    together with a 'complex'/'group' marker, or a bare complex trigger word."""
+    for trigger, members in COMPLEX_MEMBERSHIP.items():
+        if trigger in label_lower:
+            return members
+    return None
+
+
 def _is_correct_match(predicted_label: str, confirmed_species: str) -> bool:
     """
-    Transparent, simple string/complex matching between a predicted label
-    and the PCR-confirmed species. Extend the complex membership lists here
-    if new complexes are added to the taxonomy.
+    Rank-aware match between a predicted label and the PCR-confirmed species.
+
+    The scoring respects what each prediction could legitimately resolve:
+      • Complex/group prediction  -> correct if confirmed is ANY member
+        (morphology can't split the complex; only PCR can).
+      • Genus-only prediction     -> correct if confirmed shares that genus.
+      • Species-level prediction  -> correct only if the confirmed species
+        actually matches (no free genus-level credit).
+
+    Extend COMPLEX_MEMBERSHIP above when new complexes enter the taxonomy.
     """
-    predicted_lower = str(predicted_label).strip().lower()
-    species_lower = str(confirmed_species).strip().lower()
+    predicted_lower = _norm(predicted_label)
+    species_lower = _norm(confirmed_species)
+    if not predicted_lower or not species_lower:
+        return False
 
-    if "gambiae" in predicted_lower and any(
-        s in species_lower for s in
-        ["gambiae", "coluzzii", "arabiensis", "merus", "melas", "quadriannulatus"]
-    ):
-        return True
-    if "funestus" in predicted_lower and any(
-        s in species_lower for s in
-        ["funestus", "rivulorum", "parensis", "leesoni", "vaneedeni"]
-    ):
-        return True
-    if "culex" in predicted_lower and "culex" in species_lower:
-        return True
-    if "aedes" in predicted_lower and "aedes" in species_lower:
-        return True
-    if (
-        "anopheles" in predicted_lower and "anopheles" in species_lower
-        and "gambiae" not in predicted_lower and "funestus" not in predicted_lower
-    ):
-        # Pure genus-level Anopheles call (e.g. from larval screening) counts
-        # as correct if the confirmed species is any Anopheles.
-        return True
+    # 1. Complex/group prediction — credited against any member.
+    members = _complex_members_for(predicted_lower)
+    if members is not None:
+        return any(m in species_lower for m in members)
 
+    # 2. Genus-only prediction — credited against any species of that genus.
+    genus = _pure_genus(predicted_lower)
+    if genus is not None:
+        return genus in species_lower
+
+    # 3. Species-level (or other specific) prediction — require an actual
+    #    species match, so a distinct species is never credited against a
+    #    different one of the same genus.
     return predicted_lower in species_lower or species_lower in predicted_lower
 
 

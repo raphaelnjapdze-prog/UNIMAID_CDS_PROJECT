@@ -18,6 +18,7 @@ from utils.data_manager import (
     submit_site_log_entry,
 )
 from utils.icons import render_page_header
+from utils.pcr_and_accuracy import render_specimen_qr
 
 _BREEDING_SITE_OPTIONS = [
     "Stagnant pool",
@@ -123,8 +124,13 @@ def render_site_log_page():
                 if saved:
                     clear_specimen_records_cache()
                     st.success(f"Saved. Specimen ID: {saved['specimen_id']}")
-                    if saved.get("photo_urls"):
-                        st.image(saved["photo_urls"][0], caption="Uploaded photo", width=200)
+                    st.caption("Print this QR label and attach it to the physical specimen so the lab can link it to PCR results.")
+                    label_col, photo_col = st.columns(2)
+                    with label_col:
+                        render_specimen_qr(saved["specimen_id"], key="qr_sitelog_save")
+                    with photo_col:
+                        if saved.get("photo_urls"):
+                            st.image(saved["photo_urls"][0], caption="Uploaded photo", width=200)
                 else:
                     st.error("Entry was not saved — check the database connection and try again.")
 

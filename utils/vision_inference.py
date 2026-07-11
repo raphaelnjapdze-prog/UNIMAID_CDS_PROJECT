@@ -5,9 +5,11 @@ with a deterministic taxonomic guardrail layer.
 Design: Gemini analyzes the actual image and returns its raw best guess plus
 observed features — it is NEVER trusted to decide on its own whether that
 guess crosses into a cryptic species complex, or which citation applies.
-A small controlled taxonomy table (mirroring utils/morphology_keys.py and
-utils/pcr_and_accuracy.py) intercepts the raw guess and enforces the correct
-complex/group-level ceiling, molecular-confirmation flag, and citation.
+A small controlled taxonomy table intercepts the raw guess and enforces the
+correct complex/group-level ceiling, molecular-confirmation flag, and citation.
+Cryptic-complex membership is derived from the single source of truth,
+utils/morphology_keys.py::SPECIES_COMPLEXES (shared with PCR accuracy scoring),
+so the vision path can never drift from the rest of the app.
 
 This is a screening aid, not a validated diagnostic device.
 """
@@ -15,31 +17,51 @@ This is a screening aid, not a validated diagnostic device.
 import json
 
 from utils.config import GEMINI_API_KEY
+from utils.morphology_keys import SPECIES_COMPLEXES
 
 # ── Controlled taxonomy tables — never inferred by the model, always looked up ──
-_CRYPTIC_COMPLEXES = {
-    "gambiae_complex": {
-        "match_terms": ["gambiae", "coluzzii", "arabiensis", "merus", "melas", "quadriannulatus", "bwambae"],
+#
+# Cryptic-complex MEMBERSHIP lives in morphology_keys.SPECIES_COMPLEXES (the
+# single source of truth shared with the deep-key engine and PCR accuracy).
+# Vision keeps only the presentation/citation overlay it needs to report a hit;
+# the match terms are derived from the shared table so they cannot drift. Add a
+# key here (matching a SPECIES_COMPLEXES name) to have the vision path report a
+# new complex — no member list is duplicated.
+_COMPLEX_PRESENTATION = {
+    "An. gambiae complex": {
         "resolved_name": "Anopheles gambiae complex (s.l.)",
-        "molecular_confirmation_recommended": True,
-        "invasive_species_alert": False,
         "citation": "Coetzee, M. (2020). Key to the females of Afrotropical Anopheles mosquitoes. Malaria Journal, 19, 70.",
     },
-    "funestus_group": {
-        "match_terms": ["funestus", "rivulorum", "leesoni", "parensis", "vaneedeni"],
+    "An. funestus group": {
         "resolved_name": "Anopheles funestus group",
-        "molecular_confirmation_recommended": True,
-        "invasive_species_alert": False,
         "citation": "Gillies, M.T. & Coetzee, M. (1987). A Supplement to the Anophelinae of Africa South of the Sahara.",
     },
-    "pipiens_complex": {
-        "match_terms": ["pipiens", "quinquefasciatus"],
+    "Culex pipiens complex": {
         "resolved_name": "Culex pipiens complex",
-        "molecular_confirmation_recommended": True,
-        "invasive_species_alert": False,
         "citation": "Jupp, P.G. (1996). Mosquitoes of Southern Africa: Culicinae and Toxorhynchitinae.",
     },
 }
+
+
+def _build_cryptic_complexes() -> dict:
+    """Merge shared membership (SPECIES_COMPLEXES) with vision's presentation
+    overlay into the lookup the guardrail scans. Complex members are
+    morphologically inseparable, so molecular confirmation is always recommended
+    and no member is flagged invasive at the complex level."""
+    table = {}
+    for complex_name, presentation in _COMPLEX_PRESENTATION.items():
+        members = SPECIES_COMPLEXES[complex_name]["members"]
+        table[complex_name] = {
+            "match_terms": list(members),
+            "resolved_name": presentation["resolved_name"],
+            "molecular_confirmation_recommended": True,
+            "invasive_species_alert": False,
+            "citation": presentation["citation"],
+        }
+    return table
+
+
+_CRYPTIC_COMPLEXES = _build_cryptic_complexes()
 
 _FIELD_DIAGNOSTIC_SPECIES = {
     "stephensi": {
@@ -157,9 +179,8 @@ def _apply_adult_guardrails(raw: dict) -> dict:
 
     guess = str(raw.get("raw_best_guess", "")).lower()
 
-    for entry in _FIELD_DIAGNOSTIC_SPECIES.values():
-        # checked before complexes: these are genuinely diagnostic single species
-        pass
+    # Diagnostic single species are checked before complexes — they are
+    # genuinely resolvable, so they win over a broader complex match.
     for key, entry in _FIELD_DIAGNOSTIC_SPECIES.items():
         if key in guess:
             return {

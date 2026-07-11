@@ -21,6 +21,7 @@ from utils.data_manager import (
     load_specimen_records,
 )
 from utils.icons import render_page_header
+from utils.pcr_and_accuracy import render_specimen_qr
 
 
 # =========================================================================
@@ -253,6 +254,10 @@ def render_reports_page():
                                 st.image(row["_first_photo"], use_container_width=True)
                             else:
                                 st.caption("No photo for this entry.")
+                            specimen_id = row.get("specimen_id")
+                            if specimen_id and specimen_id != "n/a":
+                                with st.expander("🏷️ Specimen label (QR)"):
+                                    render_specimen_qr(specimen_id, key=f"qr_report_{specimen_id}", width=150)
                         st.markdown("<hr style='border-style:dashed; opacity:0.4;'>", unsafe_allow_html=True)
 
                 st.markdown("---")

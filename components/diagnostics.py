@@ -13,9 +13,14 @@ import streamlit as st
 
 from utils.ai_advisory import generate_ai_intervention_response
 from utils.morphology_keys import (
+    ANOPHELES_KEY_ROOT,
     GENUS_TRIAGE_MATRIX,
     SPECIES_CATALOG,
+    anopheles_key_node,
+    anopheles_key_step,
     evaluate_genus_triage,
+    get_anopheles_character_schema,
+    identify_anopheles_species,
     match_larval_morphology,
     search_species_reference,
 )
@@ -210,6 +215,247 @@ def _render_vision_result(result: dict, is_larval: bool = False):
     )
 
 
+_RESOLUTION_STYLE = {
+    "species":      ("#16A34A", "Species-level structural match"),
+    "group":        ("#D97706", "Group-level — PCR required for species"),
+    "complex":      ("#D97706", "Cryptic complex — PCR required for species"),
+    "genus":        ("#64748B", "Genus-level only — add more characters"),
+    "undetermined": ("#DC2626", "Undetermined"),
+}
+
+
+def _render_anopheles_identification(res: dict):
+    """Render the weighted-character Anopheles verdict + per-candidate audit trail."""
+    resolution = res.get("resolution_level", "undetermined")
+    color, tier_label = _RESOLUTION_STYLE.get(resolution, ("#64748B", resolution))
+
+    badges = _badge(tier_label, color)
+    if res.get("molecular_id_required"):
+        badges += _badge("PCR confirmation required", "#D97706")
+    if res.get("biosecurity_alert"):
+        badges += _badge("⚠️ Biosecurity alert", "#DC2626")
+
+    st.markdown(
+        f"""
+        <div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px;
+                    background:white; margin-bottom:14px;">
+            <div style="font-size:13px; color:#64748B; font-weight:600;">Resolved Taxon</div>
+            <div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{res.get('taxon','Anopheles spp.')}</div>
+            {_badge(f"Confidence: {res.get('confidence',0)}%", "#0369A1")}{badges}
+            <div style="font-size:13px; color:#475569; margin-top:8px;">{res.get('reason','')}</div>
+            <div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {res.get('next_step','')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    members = res.get("complex_members")
+    if members and len(members) > 1:
+        st.caption("Members of this taxon (all morphologically inseparable): " + ", ".join(members))
+
+    candidates = res.get("candidates", [])
+    if candidates:
+        st.markdown("**Ranked candidates (weighted character agreement):**")
+        for c in candidates:
+            compared = c.get("characters_compared", 0)
+            matched = c.get("characters_matched", 0)
+            contra = c.get("characters_contradicted", 0)
+            disc = "".join(f"<li>{d}</li>" for d in c.get("discriminators", []))
+            disc_block = f'<ul style="margin:6px 0 0 18px; padding:0; color:#475569; font-size:12px;">{disc}</ul>' if disc else ""
+            st.markdown(
+                f"""
+                <div style="border:1px solid #E2E8F0; border-radius:10px; padding:12px 14px;
+                            margin-bottom:8px; background:white;">
+                    <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
+                        <span style="font-size:15px; font-weight:700; color:#0F172A;">{c['species_name']}</span>
+                        <span style="font-size:12px; color:#0369A1; font-weight:700; white-space:nowrap;">{c['confidence']}% · {matched}/{compared} chars</span>
+                    </div>
+                    <div style="font-size:12px; color:#64748B; margin-top:2px;">
+                        {c.get('complex','None') if c.get('complex') not in (None,'None') else 'No complex'} ·
+                        <em>{c.get('vector_status','Unknown')}</em>
+                        {' · ⚠ ' + str(contra) + ' contradicting' if contra else ''}
+                    </div>
+                    {disc_block}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+    st.caption(
+        "🔬 Weighted character engine (Gillies & Coetzee 1987; Coetzee 2020). "
+        "Cryptic complexes (*An. gambiae* complex, *An. funestus* group) are "
+        "capped at complex/group level by design — only PCR splits them."
+    )
+
+
+def _render_key_terminal(result: dict):
+    """Render a terminal outcome from the dichotomous couplet key."""
+    resolution = result.get("resolution_level", "species")
+    color, tier_label = _RESOLUTION_STYLE.get(resolution, ("#16A34A", resolution))
+
+    badges = _badge(tier_label, color)
+    if result.get("molecular_id_required"):
+        badges += _badge("PCR required", "#D97706")
+    if result.get("biosecurity_alert"):
+        badges += _badge("⚠️ Biosecurity alert", "#DC2626")
+
+    matched = result.get("matched_species")
+    matched_line = (
+        f'<div style="font-size:12px; color:#64748B; margin-top:4px;">Key terminated at: {matched}</div>'
+        if matched and matched != result.get("taxon") else ""
+    )
+    disc = "".join(f"<li>{d}</li>" for d in result.get("discriminators", []))
+    disc_block = f'<ul style="margin:8px 0 0 18px; padding:0; color:#475569; font-size:13px;">{disc}</ul>' if disc else ""
+
+    st.markdown(
+        f"""
+        <div style="border:1px solid {color}; border-radius:12px; padding:16px 18px;
+                    background:white; margin-bottom:12px;">
+            <div style="font-size:13px; color:#64748B; font-weight:600;">Key Result</div>
+            <div style="font-size:22px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{result.get('taxon')}</div>
+            {badges}
+            {matched_line}
+            {disc_block}
+            <div style="font-size:13px; color:#475569; margin-top:8px;">{result.get('notes','')}</div>
+            <div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {result.get('next_step','')}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Vector status: {result.get('vector_status','Unknown')}")
+
+
+def _render_anopheles_deep_key():
+    """The two-tool Anopheles Deep Key section: character scoring + couplet walker."""
+    st.markdown("#### Anopheles Deep Key")
+    st.caption(
+        "A dedicated adult-female *Anopheles* engine. Score any combination of "
+        "diagnostic characters, or walk the dichotomous couplet key step by step. "
+        "Both honour the cryptic-complex ceiling — gambiae-complex / funestus-group "
+        "results stop at complex/group and are flagged for PCR."
+    )
+
+    tool = st.radio(
+        "Tool",
+        ["Character Scoring", "Interactive Couplet Key"],
+        horizontal=True,
+        key="anoph_tool",
+    )
+    st.markdown("---")
+
+    if tool == "Character Scoring":
+        col1, col2 = st.columns([5, 4])
+        with col1:
+            st.markdown("##### Observed characters")
+            st.caption("Leave any character as *Not observed*. Wing (vein 6) and hind-tarsi characters carry the most weight.")
+            schema = get_anopheles_character_schema()
+            observed = {}
+            for ch in schema:
+                label_to_id = {s["label"]: s["id"] for s in ch["states"]}
+                pick = st.selectbox(
+                    f"{ch['label']}",
+                    [_NOT_OBSERVED] + list(label_to_id.keys()),
+                    key=f"anoph_char_{ch['id']}",
+                )
+                if pick != _NOT_OBSERVED:
+                    observed[ch["id"]] = label_to_id[pick]
+            run_id = st.button("Identify Anopheles", type="primary", use_container_width=True, key="anoph_identify")
+        with col2:
+            st.markdown("##### Result")
+            if run_id:
+                if not observed:
+                    st.info("Set at least one character on the left, then click **Identify Anopheles**.")
+                else:
+                    with st.spinner("Scoring diagnostic characters…"):
+                        res = identify_anopheles_species(observed)
+                    _render_anopheles_identification(res)
+
+                    if res.get("resolution_level") not in ("undetermined", "genus"):
+                        st.markdown("---")
+                        if st.button("💾 Save this Anopheles result", key="save_anoph_char"):
+                            from utils.specimen_submission import submit_screening_result
+                            saved = submit_screening_result(
+                                screening_method="manual_checklist",
+                                result={
+                                    "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
+                                    "anopheles_deep_key": res,
+                                },
+                            )
+                            if saved:
+                                st.success(f"Saved as specimen {saved['specimen_id']}")
+                            else:
+                                st.error("Could not save — check database connection.")
+            else:
+                st.info("Set characters on the left and click **Identify Anopheles**.")
+        return
+
+    # ── Interactive couplet key (stateful walker) ──────────────────────
+    if "anoph_key_node" not in st.session_state:
+        st.session_state["anoph_key_node"] = ANOPHELES_KEY_ROOT
+    if "anoph_key_terminal" not in st.session_state:
+        st.session_state["anoph_key_terminal"] = None
+    if "anoph_key_trail" not in st.session_state:
+        st.session_state["anoph_key_trail"] = []
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.markdown("##### Dichotomous couplet key — adult female *Anopheles*")
+    with col2:
+        if st.button("↺ Restart key", use_container_width=True, key="anoph_key_reset"):
+            st.session_state["anoph_key_node"] = ANOPHELES_KEY_ROOT
+            st.session_state["anoph_key_terminal"] = None
+            st.session_state["anoph_key_trail"] = []
+
+    trail = st.session_state["anoph_key_trail"]
+    if trail:
+        st.caption("Path: " + "  →  ".join(trail))
+
+    terminal = st.session_state["anoph_key_terminal"]
+    if terminal:
+        _render_key_terminal(terminal)
+        if st.button("💾 Save this key result", key="save_anoph_key"):
+            from utils.specimen_submission import submit_screening_result
+            saved = submit_screening_result(
+                screening_method="manual_checklist",
+                result={
+                    "genus_triage": {"genus": "Anopheles"},
+                    "anopheles_couplet_key": terminal,
+                },
+            )
+            if saved:
+                st.success(f"Saved as specimen {saved['specimen_id']}")
+            else:
+                st.error("Could not save — check database connection.")
+        st.info("Click **↺ Restart key** to identify another specimen.")
+        return
+
+    node_id = st.session_state["anoph_key_node"]
+    node = anopheles_key_node(node_id)
+    if not node:
+        st.error("Key state lost — click **↺ Restart key**.")
+        return
+
+    st.markdown(
+        f'<div style="border-left:4px solid #0369A1; padding:8px 14px; margin:6px 0 12px; '
+        f'background:#F8FAFC; border-radius:6px;"><span style="font-size:12px; color:#64748B; '
+        f'font-weight:700;">COUPLET {node_id}</span><br><span style="font-size:15px; color:#0F172A; '
+        f'font-weight:600;">{node["question"]}</span></div>',
+        unsafe_allow_html=True,
+    )
+
+    for i, lead in enumerate(node["leads"]):
+        if st.button(lead["text"], key=f"anoph_lead_{node_id}_{i}", use_container_width=True):
+            step = anopheles_key_step(node_id, i)
+            st.session_state["anoph_key_trail"] = trail + [f"{node_id}{chr(97 + i)}"]
+            if step["type"] == "couplet":
+                st.session_state["anoph_key_node"] = step["node_id"]
+            elif step["type"] == "terminal":
+                st.session_state["anoph_key_terminal"] = step["result"]
+            else:
+                st.error(step.get("message", "Key error."))
+            st.rerun()
+
+
 def render_diagnostics_page(active_df: pd.DataFrame = None):
     tab1, tab2, tab3 = st.tabs([
         "Adult Identification",
@@ -228,13 +474,16 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
 
         method = st.radio(
             "Identification method",
-            ["Manual Character Checklist", "AI Photo Screening"],
+            ["Manual Character Checklist", "Anopheles Deep Key", "AI Photo Screening"],
             horizontal=True,
             key="adult_method",
         )
         st.markdown("---")
 
-        if method == "Manual Character Checklist":
+        if method == "Anopheles Deep Key":
+            _render_anopheles_deep_key()
+
+        elif method == "Manual Character Checklist":
             col1, col2 = st.columns([5, 4])
 
             with col1:

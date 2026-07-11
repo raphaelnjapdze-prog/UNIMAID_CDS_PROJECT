@@ -5,6 +5,29 @@ species reference catalogs for 60 distinct African mosquito profiles.
 
 Grounded completely in standard reference criteria: Coetzee (2020), Gillies &
 Coetzee (1987), Service (1990), and Jupp (1996).
+
+── Anopheles Deep-Key Engine ──────────────────────────────────────────────
+Beyond the genus/marker triage above, this module carries a dedicated,
+character-driven identification engine for adult female *Anopheles* — the
+genus that matters most for malaria surveillance. It has three pillars:
+
+  1. ANOPHELES_CHARACTERS      — a controlled vocabulary of the real
+     diagnostic characters used in the standard adult keys (wing pale/dark
+     spots, maxillary-palp banding, hind-tarsi banding, leg speckling, …),
+     each weighted by discriminating power.
+  2. identify_anopheles_species() — a transparent weighted-agreement scorer
+     that ranks catalogued species against observed characters and reports a
+     per-character audit trail (what matched, what contradicted).
+  3. ANOPHELES_COUPLET_KEY + anopheles_key_step() — a genuine dichotomous
+     couplet walker mirroring Gillies & Coetzee (1987).
+
+DOMAIN GUARDRAIL (hard rule, matches models/ and vision_inference.py): the
+*An. gambiae* complex and *An. funestus* group are morphologically
+inseparable to species. Both engines here therefore expose a per-taxon
+`resolution_level` (`species` / `group` / `complex`) and **collapse** any
+complex/group hit to the complex/group name with `molecular_id_required=True`
+— they never manufacture a single-species answer the morphology can't support.
+This is a screening aid, not a validated diagnostic device.
 """
 
 # --- GENUS LEVEL DEFINITIONS ---
@@ -594,6 +617,52 @@ SPECIES_CATALOG = {
     ]
 }
 
+# ==========================================================================
+#  CRYPTIC SPECIES-COMPLEX MEMBERSHIP — SINGLE SOURCE OF TRUTH
+# --------------------------------------------------------------------------
+#  Members of these complexes/groups are morphologically inseparable, so a
+#  field/image identification can only ever name the complex, never a member
+#  species. This one table is the authoritative membership list for the whole
+#  app: the deep-key engine caps results at these complexes, and PCR accuracy
+#  scoring (utils/pcr_and_accuracy.py) derives its "credit a complex prediction
+#  against any confirmed member" logic from here — so the two can never drift.
+#
+#  `trigger` is the lowercase word that appears in a complex/group label
+#  (e.g. "An. gambiae complex" -> "gambiae"); `members` are lowercase species
+#  epithets, a curated SUPERSET of the field catalog (PCR can confirm a member
+#  that never appears in routine field screening, e.g. An. bwambae).
+# ==========================================================================
+SPECIES_COMPLEXES = {
+    "An. gambiae complex":   {"genus": "Anopheles", "trigger": "gambiae",
+                              "members": ["gambiae", "coluzzii", "arabiensis", "merus",
+                                          "melas", "quadriannulatus", "bwambae"]},
+    "An. funestus group":    {"genus": "Anopheles", "trigger": "funestus",
+                              "members": ["funestus", "rivulorum", "parensis",
+                                          "leesoni", "vaneedeni"]},
+    "An. coustani group":    {"genus": "Anopheles", "trigger": "coustani",
+                              "members": ["coustani", "ziemanni", "paludis", "namibiensis"]},
+    "An. nili group":        {"genus": "Anopheles", "trigger": "nili",
+                              "members": ["nili", "ovengensis", "somalicus", "carnevalei"]},
+    "An. moucheti group":    {"genus": "Anopheles", "trigger": "moucheti",
+                              "members": ["moucheti", "nigeriensis", "bervoetsi"]},
+    "An. marshallii group":  {"genus": "Anopheles", "trigger": "marshallii",
+                              "members": ["marshallii", "demeilloni", "hancocki"]},
+    "Culex pipiens complex": {"genus": "Culex", "trigger": "pipiens",
+                              "members": ["pipiens", "quinquefasciatus", "molestus"]},
+    "Aedes simpsoni complex": {"genus": "Aedes", "trigger": "simpsoni",
+                               "members": ["simpsoni", "bromeliae", "lilii"]},
+}
+
+
+def complex_membership_by_trigger() -> dict:
+    """trigger-word -> member epithets, for matching against free-text labels.
+
+    Consumers (e.g. PCR accuracy scoring) that only have a taxon *string* use
+    this to decide whether a complex/group prediction covers a confirmed
+    species, without re-hardcoding the membership lists."""
+    return {c["trigger"]: list(c["members"]) for c in SPECIES_COMPLEXES.values()}
+
+
 def evaluate_genus_triage(input_features: dict) -> dict:
     """
     Scores adult morphological screening entries against standard genus parameters.
@@ -771,4 +840,610 @@ def match_larval_morphology(*args, **kwargs):
     triage["resolved_taxonomic_name"] = triage.get("resolved_genus", "Undetermined Genus")
 
     return triage
+
+
+# ==========================================================================
+#  ANOPHELES DEEP-KEY IDENTIFICATION ENGINE
+# --------------------------------------------------------------------------
+#  Adult-female Anopheles are the malaria-relevant genus, so they get a
+#  dedicated, character-resolved engine. Character states and weights are a
+#  faithful (if simplified) reduction of the standard Afrotropical adult keys
+#  — Gillies & Coetzee (1987), Coetzee (2020). Weights encode how much
+#  discriminating power a character carries (5 = strongly diagnostic).
+# ==========================================================================
+
+ANOPHELES_CHARACTERS = {
+    "proboscis": {
+        "label": "Proboscis coloration",
+        "weight": 3,
+        "states": {
+            "dark_uniform": "Uniformly dark along its length",
+            "pale_tipped": "Apical portion distinctly pale / pale-scaled",
+        },
+    },
+    "palp_pale_bands": {
+        "label": "Maxillary palp — number of pale bands",
+        "weight": 3,
+        "states": {
+            "three_bands": "Three pale bands (typical gambiae / funestus pattern)",
+            "four_bands": "Four pale bands",
+            "faint_or_none": "Pale bands faint, speckled or effectively absent",
+        },
+    },
+    "palp_apical_band": {
+        "label": "Palp apical (tip) pale band",
+        "weight": 2,
+        "states": {
+            "broad_pale_apical": "Broad / long apical pale band",
+            "narrow_pale_apical": "Narrow apical pale band",
+            "speckled_palp": "Palp irregularly speckled / dark-spotted",
+        },
+    },
+    "vein6_dark_spots": {
+        "label": "Wing vein 6 (1A) — dark spots",
+        "weight": 4,
+        "states": {
+            "two_spots": "Two dark spots",
+            "one_spot": "One dark spot",
+            "none": "No distinct dark spots",
+        },
+    },
+    "costa_wing_spots": {
+        "label": "Wing costa — pale spotting",
+        "weight": 2,
+        "states": {
+            "many_pale_spots": "Several distinct pale spots (strongly patterned costa)",
+            "few_pale_spots": "Mostly dark with a few pale interruptions",
+            "largely_pale": "Costa largely pale / lightly scaled",
+        },
+    },
+    "hind_tarsi": {
+        "label": "Hind tarsi — pale banding",
+        "weight": 4,
+        "states": {
+            "broad_white_bands": "Broad, conspicuous white bands",
+            "narrow_pale_bands": "Narrow pale rings at the joints",
+            "dark_no_bands": "Entirely dark, no pale bands",
+        },
+    },
+    "hind_tarsomere5": {
+        "label": "Hind tarsomere 5 (last segment)",
+        "weight": 3,
+        "states": {
+            "all_pale": "Entirely pale / white",
+            "dark": "Dark",
+        },
+    },
+    "leg_speckling": {
+        "label": "Femora & tibiae speckling",
+        "weight": 3,
+        "states": {
+            "speckled": "Distinctly speckled with pale specks",
+            "unspeckled": "Not speckled (uniformly scaled)",
+        },
+    },
+    "wing_fringe_spots": {
+        "label": "Wing fringe pale spots",
+        "weight": 2,
+        "states": {
+            "present": "Distinct pale fringe spots present",
+            "faint_absent": "Faint or absent",
+        },
+    },
+    "body_size": {
+        "label": "Overall body size",
+        "weight": 2,
+        "states": {
+            "large": "Large / robust",
+            "medium": "Medium",
+            "small": "Small",
+        },
+    },
+}
+
+# Shared state templates for cryptic taxa whose members are structurally identical.
+_GAMBIAE_COMPLEX_STATES = {
+    "proboscis": "dark_uniform",
+    "palp_pale_bands": "three_bands",
+    "palp_apical_band": "broad_pale_apical",
+    "vein6_dark_spots": "two_spots",
+    "costa_wing_spots": "few_pale_spots",
+    "hind_tarsi": "narrow_pale_bands",
+    "hind_tarsomere5": "dark",
+    "leg_speckling": "unspeckled",
+    "wing_fringe_spots": "present",
+    "body_size": "medium",
+}
+_FUNESTUS_GROUP_STATES = {
+    "proboscis": "dark_uniform",
+    "palp_pale_bands": "three_bands",
+    "palp_apical_band": "broad_pale_apical",
+    "vein6_dark_spots": "two_spots",
+    "costa_wing_spots": "many_pale_spots",
+    "hind_tarsi": "dark_no_bands",   # dark hind tarsi separate funestus grp from gambiae cplx
+    "hind_tarsomere5": "dark",
+    "leg_speckling": "unspeckled",
+    "wing_fringe_spots": "present",
+    "body_size": "medium",
+}
+_COUSTANI_GROUP_STATES = {
+    "proboscis": "pale_tipped",
+    "palp_pale_bands": "three_bands",
+    "palp_apical_band": "narrow_pale_apical",
+    "vein6_dark_spots": "two_spots",
+    "hind_tarsi": "narrow_pale_bands",
+    "leg_speckling": "speckled",
+    "wing_fringe_spots": "present",
+    "body_size": "medium",
+}
+
+# species_name -> structural profile. Names MUST match SPECIES_CATALOG["Anopheles"].
+ANOPHELES_KEY_PROFILES = {
+    # ── An. gambiae complex — morphologically inseparable (PCR only) ──
+    "Anopheles gambiae (s.s.)": {
+        "resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": _GAMBIAE_COMPLEX_STATES,
+        "discriminators": ["Inseparable from other complex members by morphology — PCR (Scott et al. 1993) required"],
+    },
+    "Anopheles coluzzii": {
+        "resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": _GAMBIAE_COMPLEX_STATES,
+        "discriminators": ["Ecology (permanent/man-made water) differs, morphology does not — PCR required"],
+    },
+    "Anopheles arabiensis": {
+        "resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": _GAMBIAE_COMPLEX_STATES,
+        "discriminators": ["More exophilic/zoophilic, but structurally identical — PCR required"],
+    },
+    "Anopheles merus": {
+        "resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": _GAMBIAE_COMPLEX_STATES,
+        "discriminators": ["Coastal saline breeder; structurally identical — PCR required"],
+    },
+    "Anopheles melas": {
+        "resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": _GAMBIAE_COMPLEX_STATES,
+        "discriminators": ["West African mangrove/saline breeder; structurally identical — PCR required"],
+    },
+    "Anopheles quadriannulatus": {
+        "resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": _GAMBIAE_COMPLEX_STATES,
+        "discriminators": ["Zoophilic non-vector; structurally identical — PCR required"],
+    },
+    # ── An. funestus group — inseparable to species in the field ──
+    "Anopheles funestus (s.s.)": {
+        "resolution_level": "group", "complex": "An. funestus group",
+        "character_states": _FUNESTUS_GROUP_STATES,
+        "discriminators": ["Entirely dark hind tarsi + long apical palp band separate the group from gambiae cplx",
+                           "Species split within the group needs PCR (Koekemoer et al. 2002)"],
+    },
+    "Anopheles rivulorum": {
+        "resolution_level": "group", "complex": "An. funestus group",
+        "character_states": _FUNESTUS_GROUP_STATES,
+        "discriminators": ["Field-inseparable from funestus s.s. — PCR required"],
+    },
+    "Anopheles leesoni": {
+        "resolution_level": "group", "complex": "An. funestus group",
+        "character_states": _FUNESTUS_GROUP_STATES,
+        "discriminators": ["Non-vector funestus-group member — PCR required to confirm"],
+    },
+    # ── Distinguishable / group-level Anopheles ──
+    "Anopheles nili": {
+        "resolution_level": "group", "complex": "An. nili group",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "palp_apical_band": "broad_pale_apical", "vein6_dark_spots": "two_spots",
+            "costa_wing_spots": "few_pale_spots", "hind_tarsi": "dark_no_bands",
+            "hind_tarsomere5": "dark", "leg_speckling": "unspeckled",
+            "wing_fringe_spots": "present", "body_size": "medium",
+        },
+        "discriminators": ["Pale spot at base of vein 6; evenly distributed fringe spots",
+                           "Fast-flowing, well-oxygenated stream breeder"],
+    },
+    "Anopheles moucheti": {
+        "resolution_level": "group", "complex": "An. moucheti group",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "vein6_dark_spots": "one_spot", "costa_wing_spots": "few_pale_spots",
+            "hind_tarsi": "dark_no_bands", "hind_tarsomere5": "dark",
+            "leg_speckling": "unspeckled", "wing_fringe_spots": "faint_absent",
+            "body_size": "medium",
+        },
+        "discriminators": ["Dark, relatively unpatterned wings", "Slow riverine / floating-vegetation margins"],
+    },
+    "Anopheles pharoensis": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "four_bands",
+            "palp_apical_band": "broad_pale_apical", "vein6_dark_spots": "two_spots",
+            "costa_wing_spots": "many_pale_spots", "hind_tarsi": "broad_white_bands",
+            "hind_tarsomere5": "all_pale", "leg_speckling": "speckled",
+            "wing_fringe_spots": "present", "body_size": "large",
+        },
+        "discriminators": ["Large body + 4 palpal pale bands + speckled legs + broad pale tarsal blocks",
+                           "One of the most structurally distinctive African Anopheles"],
+    },
+    "Anopheles squamosus": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "vein6_dark_spots": "one_spot", "costa_wing_spots": "largely_pale",
+            "hind_tarsi": "narrow_pale_bands", "hind_tarsomere5": "dark",
+            "leg_speckling": "unspeckled", "wing_fringe_spots": "faint_absent",
+            "body_size": "medium",
+        },
+        "discriminators": ["Pale, lightly-scaled wings; savanna", "Separate from coustani via tarsal banding detail"],
+    },
+    "Anopheles coustani": {
+        "resolution_level": "group", "complex": "An. coustani group",
+        "character_states": _COUSTANI_GROUP_STATES,
+        "discriminators": ["Pale-tipped proboscis/palps + narrow pale tarsal rings", "Treat as coustani group in routine surveys"],
+    },
+    "Anopheles ziemanni": {
+        "resolution_level": "group", "complex": "An. coustani group",
+        "character_states": _COUSTANI_GROUP_STATES,
+        "discriminators": ["Field-inseparable from the coustani group; log as group"],
+    },
+    "Anopheles rufipes": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "vein6_dark_spots": "two_spots", "hind_tarsi": "broad_white_bands",
+            "hind_tarsomere5": "all_pale", "leg_speckling": "speckled",
+            "wing_fringe_spots": "present", "body_size": "medium",
+        },
+        "discriminators": ["Reddish-brown / pale hind tarsi ('red-footed')", "Speckled femora & tibiae"],
+    },
+    "Anopheles wellcomei": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "costa_wing_spots": "largely_pale", "hind_tarsi": "narrow_pale_bands",
+            "leg_speckling": "unspeckled", "body_size": "small",
+        },
+        "discriminators": ["Small, pale Sahelian species — confirm with the full couplet key"],
+    },
+    "Anopheles maculipalpis": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "faint_or_none",
+            "palp_apical_band": "speckled_palp", "hind_tarsi": "narrow_pale_bands",
+            "leg_speckling": "speckled", "body_size": "medium",
+        },
+        "discriminators": ["Distinctly speckled / dark-spotted palps — a rare field-visible name-diagnostic character"],
+    },
+    "Anopheles demeilloni": {
+        "resolution_level": "group", "complex": "An. marshallii group",
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "vein6_dark_spots": "two_spots", "hind_tarsi": "narrow_pale_bands",
+            "leg_speckling": "unspeckled", "body_size": "medium",
+        },
+        "discriminators": ["East/Central African highland species; needs full stereomicroscope keying"],
+    },
+    "Anopheles stephensi": {
+        "resolution_level": "species", "complex": "None (invasive)", "biosecurity_alert": True,
+        "character_states": {
+            "proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "palp_apical_band": "narrow_pale_apical", "vein6_dark_spots": "two_spots",
+            "costa_wing_spots": "few_pale_spots", "hind_tarsi": "narrow_pale_bands",
+            "hind_tarsomere5": "dark", "leg_speckling": "unspeckled",
+            "wing_fringe_spots": "present", "body_size": "medium",
+        },
+        "discriminators": ["Container / urban breeder — invasive Asian vector",
+                           "Palpal banding per Coetzee (2020) invasive-vector key; CONFIRM BY PCR"],
+    },
+}
+
+
+def get_anopheles_character_schema() -> list[dict]:
+    """
+    Ordered, UI-ready description of the Anopheles character vocabulary.
+    Each entry: {id, label, weight, states:[{id, label}, ...]}.
+    """
+    return [
+        {
+            "id": cid,
+            "label": char["label"],
+            "weight": char["weight"],
+            "states": [{"id": sid, "label": slabel} for sid, slabel in char["states"].items()],
+        }
+        for cid, char in ANOPHELES_CHARACTERS.items()
+    ]
+
+
+_ANOPHELES_SPECIES_INDEX = None
+
+
+def _anopheles_species_index() -> dict:
+    """Lazy name -> SPECIES_CATALOG entry map for the Anopheles genus."""
+    global _ANOPHELES_SPECIES_INDEX
+    if _ANOPHELES_SPECIES_INDEX is None:
+        _ANOPHELES_SPECIES_INDEX = {
+            sp["name"]: sp for sp in SPECIES_CATALOG.get("Anopheles", [])
+        }
+    return _ANOPHELES_SPECIES_INDEX
+
+
+def _state_matches(observed_state: str, expected) -> bool:
+    if isinstance(expected, (list, tuple, set)):
+        return observed_state in expected
+    return observed_state == expected
+
+
+def identify_anopheles_species(observed_characters: dict) -> dict:
+    """
+    Weighted character-agreement identifier for adult female *Anopheles*.
+
+    `observed_characters` maps character ids (keys of ANOPHELES_CHARACTERS) to
+    observed state ids. Only recognised, non-empty pairs are scored.
+
+    Returns a structured verdict carrying:
+      resolution_level  species | group | complex | genus | undetermined
+      taxon             the honestly-resolvable name (complex/group name when
+                        the top hit is a cryptic taxon — never a fake species)
+      confidence        weighted % agreement of the leading taxon
+      candidates        ranked per-species audit trail (matched/contradicted)
+      molecular_id_required, next_step, reason
+
+    The cryptic-complex ceiling is enforced: a gambiae-complex or funestus-group
+    winner is collapsed to its complex/group with molecular_id_required=True.
+    """
+    observed = {
+        cid: state
+        for cid, state in (observed_characters or {}).items()
+        if cid in ANOPHELES_CHARACTERS and state
+    }
+    if not observed:
+        return {
+            "resolution_level": "undetermined",
+            "taxon": "Anopheles spp.",
+            "confidence": 0,
+            "candidates": [],
+            "molecular_id_required": False,
+            "reason": "No diagnostic characters supplied.",
+            "next_step": "Record wing, palp and hind-tarsi characters, or walk the couplet key.",
+        }
+
+    index = _anopheles_species_index()
+    scored = []
+    for name, profile in ANOPHELES_KEY_PROFILES.items():
+        states = profile["character_states"]
+        matched_w = total_w = matched = contradicted = 0
+        for cid, obs_state in observed.items():
+            if cid not in states:
+                continue
+            weight = ANOPHELES_CHARACTERS[cid]["weight"]
+            total_w += weight
+            if _state_matches(obs_state, states[cid]):
+                matched_w += weight
+                matched += 1
+            else:
+                contradicted += 1
+        if total_w == 0:
+            continue
+        # Reward agreement, penalise contradictions (0.75 x their weight).
+        raw = matched_w - 0.75 * (total_w - matched_w)
+        confidence = max(0, min(100, int(round((matched_w / total_w) * 100))))
+        sp = index.get(name, {})
+        scored.append({
+            "species_name": name,
+            "complex": profile.get("complex", "None"),
+            "resolution_level": profile.get("resolution_level", "species"),
+            "raw_score": round(raw, 2),
+            "confidence": confidence,
+            "characters_matched": matched,
+            "characters_contradicted": contradicted,
+            "characters_compared": matched + contradicted,
+            "vector_status": sp.get("vector_status", "Unknown"),
+            "molecular_id_required": sp.get(
+                "molecular_id_required",
+                profile.get("resolution_level") in ("complex", "group"),
+            ),
+            "biosecurity_alert": sp.get("biosecurity_alert", profile.get("biosecurity_alert", False)),
+            "discriminators": profile.get("discriminators", []),
+            "notes": sp.get("notes", ""),
+        })
+
+    scored.sort(key=lambda c: (c["raw_score"], c["confidence"], c["characters_matched"]), reverse=True)
+    positive = [c for c in scored if c["raw_score"] > 0]
+    ranked = positive or scored[:1]
+    top = ranked[0]
+
+    # Too little signal to commit beyond genus.
+    if top["confidence"] < 40 or top["characters_compared"] < 2:
+        return {
+            "resolution_level": "genus",
+            "taxon": "Anopheles spp.",
+            "confidence": top["confidence"],
+            "candidates": ranked[:6],
+            "molecular_id_required": False,
+            "reason": "Character agreement too weak/ambiguous to resolve below genus.",
+            "next_step": "Add more diagnostic characters (wing + hind-tarsi carry the most weight) or use the couplet key.",
+        }
+
+    ceiling = top["resolution_level"]
+    if ceiling in ("complex", "group"):
+        complex_name = top["complex"]
+        members = [c["species_name"] for c in scored if c["complex"] == complex_name]
+        return {
+            "resolution_level": ceiling,
+            "taxon": complex_name,
+            "confidence": top["confidence"],
+            "candidates": ranked[:6],
+            "complex_members": members,
+            "molecular_id_required": True,
+            "reason": (
+                f"Characters match the {complex_name}; its members are "
+                "morphologically inseparable, so identification stops at the "
+                f"{ceiling} level."
+            ),
+            "next_step": "Submit for PCR (species-diagnostic assay) — morphology cannot split this taxon.",
+        }
+
+    return {
+        "resolution_level": "species",
+        "taxon": top["species_name"],
+        "confidence": top["confidence"],
+        "candidates": ranked[:6],
+        "molecular_id_required": top["molecular_id_required"],
+        "biosecurity_alert": top["biosecurity_alert"],
+        "reason": f"Best structural match: {top['species_name']} ({top['confidence']}% weighted character agreement).",
+        "next_step": "Verify the listed discriminating characters against the full dichotomous key before reporting.",
+    }
+
+
+# --------------------------------------------------------------------------
+#  Dichotomous couplet key (adult female Anopheles) — simplified from
+#  Gillies & Coetzee (1987). Each node poses a couplet; a lead either advances
+#  to another node (`goto`) or terminates at a taxon (`taxon`). Terminal leads
+#  may carry `complex`/`group` (forces a complex/group-level, PCR-flagged
+#  result) or `alert` (biosecurity).
+# --------------------------------------------------------------------------
+ANOPHELES_COUPLET_KEY = {
+    "1": {
+        "question": "Hind tarsi with broad conspicuous white bands, and/or femora & tibiae distinctly speckled?",
+        "leads": [
+            {"text": "Yes — broad white tarsal bands and/or speckled legs", "goto": "2"},
+            {"text": "No — hind tarsi dark or only narrowly ringed, legs not speckled", "goto": "3"},
+        ],
+    },
+    "2": {
+        "question": "Large, robust body with FOUR palpal pale bands and speckled legs?",
+        "leads": [
+            {"text": "Yes — large, 4 palpal bands, speckled legs, broad pale tarsal blocks", "taxon": "Anopheles pharoensis"},
+            {"text": "No — medium body, hind tarsi reddish/pale ('red-footed'), legs speckled", "taxon": "Anopheles rufipes"},
+        ],
+    },
+    "3": {
+        "question": "Hind tarsi ENTIRELY dark (no pale bands at the joints)?",
+        "leads": [
+            {"text": "Yes — hind tarsi wholly dark", "goto": "4"},
+            {"text": "No — hind tarsi with narrow pale rings at the joints", "goto": "6"},
+        ],
+    },
+    "4": {
+        "question": "Wing with a distinct pale spot at the base of vein 6; breeds in fast-flowing, well-oxygenated streams?",
+        "leads": [
+            {"text": "Yes — pale spot at base of vein 6, patterned fringe", "taxon": "Anopheles nili", "group": "An. nili group"},
+            {"text": "No — wing dark and relatively unpatterned", "goto": "5"},
+        ],
+    },
+    "5": {
+        "question": "Palp with a long broad apical pale band and a distinct sector pale spot on the costa?",
+        "leads": [
+            {"text": "Yes — long apical palp band, patterned costa", "taxon": "Anopheles funestus (s.s.)", "group": "An. funestus group"},
+            {"text": "No — wing largely dark, slow riverine / floating-vegetation habitat", "taxon": "Anopheles moucheti", "group": "An. moucheti group"},
+        ],
+    },
+    "6": {
+        "question": "Palps distinctly speckled / irregularly dark-spotted, legs speckled?",
+        "leads": [
+            {"text": "Yes — speckled palps", "taxon": "Anopheles maculipalpis"},
+            {"text": "No — palps with three clean pale bands, legs not speckled", "goto": "7"},
+        ],
+    },
+    "7": {
+        "question": "Proboscis and/or palp tips distinctly pale; grassy swamp-margin savanna habitat?",
+        "leads": [
+            {"text": "Yes — pale-tipped proboscis/palps", "taxon": "Anopheles coustani", "group": "An. coustani group"},
+            {"text": "No — proboscis uniformly dark", "goto": "8"},
+        ],
+    },
+    "8": {
+        "question": "Wing costa largely pale / lightly scaled (NOT the contrasting pale-and-dark spotted pattern of the gambiae complex)?",
+        "leads": [
+            {"text": "Yes — pale, lightly-scaled wings", "goto": "9"},
+            {"text": "No — wing with contrasting pale/dark spots, proboscis uniformly dark", "goto": "10"},
+        ],
+    },
+    "9": {
+        "question": "Very small-bodied with a Sahelian / arid-zone distribution?",
+        "leads": [
+            {"text": "Yes — small, pale, Sahelian", "taxon": "Anopheles wellcomei"},
+            {"text": "No — medium body, widespread open savanna", "taxon": "Anopheles squamosus"},
+        ],
+    },
+    "10": {
+        "question": "Cool highland / montane distribution (East & Central African highlands)?",
+        "leads": [
+            {"text": "Yes — highland / montane species", "taxon": "Anopheles demeilloni", "group": "An. marshallii group"},
+            {"text": "No — lowland / savanna distribution", "goto": "11"},
+        ],
+    },
+    "11": {
+        "question": "Container / urban breeding with palpal banding matching the Coetzee (2020) invasive-vector key?",
+        "leads": [
+            {"text": "Yes — urban container breeder (invasive profile)", "taxon": "Anopheles stephensi", "alert": True},
+            {"text": "No — standard rain-pool / permanent-water breeder", "taxon": "Anopheles gambiae (s.s.)", "complex": "An. gambiae complex"},
+        ],
+    },
+}
+
+ANOPHELES_KEY_ROOT = "1"
+
+
+def anopheles_key_node(node_id: str) -> dict | None:
+    """Return the couplet node for `node_id` (or None if unknown)."""
+    return ANOPHELES_COUPLET_KEY.get(node_id)
+
+
+def _resolve_key_terminal(lead: dict) -> dict:
+    """Build a rich, guardrail-respecting result for a terminal key lead."""
+    name = lead["taxon"]
+    sp = _anopheles_species_index().get(name, {})
+    profile = ANOPHELES_KEY_PROFILES.get(name, {})
+
+    if "complex" in lead:
+        resolution, taxon = "complex", lead["complex"]
+    elif "group" in lead:
+        resolution, taxon = "group", lead["group"]
+    else:
+        resolution = profile.get("resolution_level", "species")
+        taxon = profile.get("complex", "None") if resolution in ("complex", "group") else name
+        if taxon in (None, "None"):
+            taxon = name
+
+    is_cryptic = resolution in ("complex", "group")
+    return {
+        "taxon": taxon,
+        "matched_species": name,
+        "resolution_level": resolution,
+        "complex": lead.get("complex") or lead.get("group") or profile.get("complex", "None"),
+        "vector_status": sp.get("vector_status", "Unknown"),
+        # A group/complex terminal is inseparable to species → always require PCR,
+        # regardless of any single member's catalog flag.
+        "molecular_id_required": bool(is_cryptic or sp.get("molecular_id_required", False)),
+        "biosecurity_alert": bool(lead.get("alert") or sp.get("biosecurity_alert", False)),
+        "discriminators": profile.get("discriminators", []),
+        "notes": sp.get("notes", ""),
+        "next_step": (
+            "Submit for PCR — this taxon cannot be split to species by morphology."
+            if is_cryptic
+            else "Confirm against the full dichotomous key and verify the listed discriminators."
+        ),
+    }
+
+
+def anopheles_key_step(node_id: str, lead_index: int) -> dict:
+    """
+    Advance the couplet key one step.
+
+    Returns either:
+      {"type": "couplet",  "node_id": <next>, "couplet": <node>}
+      {"type": "terminal", "result": {...}}
+      {"type": "error",    "message": "..."}
+    """
+    node = ANOPHELES_COUPLET_KEY.get(node_id)
+    if not node:
+        return {"type": "error", "message": f"Unknown key node '{node_id}'."}
+    try:
+        lead = node["leads"][lead_index]
+    except (IndexError, TypeError):
+        return {"type": "error", "message": "Invalid lead selection for this couplet."}
+
+    if "goto" in lead:
+        nxt = lead["goto"]
+        return {"type": "couplet", "node_id": nxt, "couplet": ANOPHELES_COUPLET_KEY[nxt]}
+    return {"type": "terminal", "result": _resolve_key_terminal(lead)}
 
