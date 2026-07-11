@@ -229,23 +229,25 @@ def _render_anopheles_identification(res: dict):
     resolution = res.get("resolution_level", "undetermined")
     color, tier_label = _RESOLUTION_STYLE.get(resolution, ("#64748B", resolution))
 
-    badges = _badge(tier_label, color)
+    badges = _badge(f"Confidence: {res.get('confidence',0)}%", "#0369A1") + _badge(tier_label, color)
     if res.get("molecular_id_required"):
         badges += _badge("PCR confirmation required", "#D97706")
     if res.get("biosecurity_alert"):
         badges += _badge("⚠️ Biosecurity alert", "#DC2626")
 
+    # Assemble as flat, single-line HTML: a blank line (from an empty fragment)
+    # would terminate Streamlit's raw-HTML block and make the rest render as an
+    # escaped code block, so we join only non-empty parts with no newlines.
+    inner = "".join(p for p in [
+        '<div style="font-size:13px; color:#64748B; font-weight:600;">Resolved Taxon</div>',
+        f'<div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{res.get("taxon","Anopheles spp.")}</div>',
+        f'<div style="margin:2px 0 6px;">{badges}</div>',
+        f'<div style="font-size:13px; color:#475569; margin-top:8px;">{res.get("reason","")}</div>',
+        f'<div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {res.get("next_step","")}</div>',
+    ] if p)
     st.markdown(
-        f"""
-        <div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px;
-                    background:white; margin-bottom:14px;">
-            <div style="font-size:13px; color:#64748B; font-weight:600;">Resolved Taxon</div>
-            <div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{res.get('taxon','Anopheles spp.')}</div>
-            {_badge(f"Confidence: {res.get('confidence',0)}%", "#0369A1")}{badges}
-            <div style="font-size:13px; color:#475569; margin-top:8px;">{res.get('reason','')}</div>
-            <div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {res.get('next_step','')}</div>
-        </div>
-        """,
+        f'<div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px; '
+        f'background:white; margin-bottom:14px;">{inner}</div>',
         unsafe_allow_html=True,
     )
 
@@ -260,24 +262,22 @@ def _render_anopheles_identification(res: dict):
             compared = c.get("characters_compared", 0)
             matched = c.get("characters_matched", 0)
             contra = c.get("characters_contradicted", 0)
-            disc = "".join(f"<li>{d}</li>" for d in c.get("discriminators", []))
-            disc_block = f'<ul style="margin:6px 0 0 18px; padding:0; color:#475569; font-size:12px;">{disc}</ul>' if disc else ""
+            disc = "".join(f'<div style="margin-top:3px;">• {d}</div>' for d in c.get("discriminators", []))
+            disc_block = f'<div style="color:#475569; font-size:12px; margin-top:6px;">{disc}</div>' if disc else ""
+            complex_txt = c.get("complex", "None") if c.get("complex") not in (None, "None") else "No complex"
+            contra_txt = f" · ⚠ {contra} contradicting" if contra else ""
+            inner = "".join([
+                '<div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">'
+                f'<span style="font-size:15px; font-weight:700; color:#0F172A;">{c["species_name"]}</span>'
+                f'<span style="font-size:12px; color:#0369A1; font-weight:700; white-space:nowrap;">{c["confidence"]}% · {matched}/{compared} chars</span>'
+                "</div>",
+                f'<div style="font-size:12px; color:#64748B; margin-top:2px;">{complex_txt} · '
+                f'<em>{c.get("vector_status","Unknown")}</em>{contra_txt}</div>',
+                disc_block,
+            ])
             st.markdown(
-                f"""
-                <div style="border:1px solid #E2E8F0; border-radius:10px; padding:12px 14px;
-                            margin-bottom:8px; background:white;">
-                    <div style="display:flex; justify-content:space-between; gap:10px; align-items:baseline;">
-                        <span style="font-size:15px; font-weight:700; color:#0F172A;">{c['species_name']}</span>
-                        <span style="font-size:12px; color:#0369A1; font-weight:700; white-space:nowrap;">{c['confidence']}% · {matched}/{compared} chars</span>
-                    </div>
-                    <div style="font-size:12px; color:#64748B; margin-top:2px;">
-                        {c.get('complex','None') if c.get('complex') not in (None,'None') else 'No complex'} ·
-                        <em>{c.get('vector_status','Unknown')}</em>
-                        {' · ⚠ ' + str(contra) + ' contradicting' if contra else ''}
-                    </div>
-                    {disc_block}
-                </div>
-                """,
+                f'<div style="border:1px solid #E2E8F0; border-radius:10px; padding:12px 14px; '
+                f'margin-bottom:8px; background:white;">{inner}</div>',
                 unsafe_allow_html=True,
             )
 
@@ -304,22 +304,22 @@ def _render_key_terminal(result: dict):
         f'<div style="font-size:12px; color:#64748B; margin-top:4px;">Key terminated at: {matched}</div>'
         if matched and matched != result.get("taxon") else ""
     )
-    disc = "".join(f"<li>{d}</li>" for d in result.get("discriminators", []))
-    disc_block = f'<ul style="margin:8px 0 0 18px; padding:0; color:#475569; font-size:13px;">{disc}</ul>' if disc else ""
+    disc = "".join(f'<div style="margin-top:4px;">• {d}</div>' for d in result.get("discriminators", []))
+    disc_block = f'<div style="color:#475569; font-size:13px; margin-top:8px;">{disc}</div>' if disc else ""
 
+    # Flat single-line HTML — omit empty parts so no blank line breaks the block.
+    inner = "".join(p for p in [
+        '<div style="font-size:13px; color:#64748B; font-weight:600;">Key Result</div>',
+        f'<div style="font-size:22px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{result.get("taxon")}</div>',
+        f'<div style="margin:2px 0 6px;">{badges}</div>',
+        matched_line,
+        disc_block,
+        f'<div style="font-size:13px; color:#475569; margin-top:8px;">{result.get("notes","")}</div>',
+        f'<div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {result.get("next_step","")}</div>',
+    ] if p)
     st.markdown(
-        f"""
-        <div style="border:1px solid {color}; border-radius:12px; padding:16px 18px;
-                    background:white; margin-bottom:12px;">
-            <div style="font-size:13px; color:#64748B; font-weight:600;">Key Result</div>
-            <div style="font-size:22px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{result.get('taxon')}</div>
-            {badges}
-            {matched_line}
-            {disc_block}
-            <div style="font-size:13px; color:#475569; margin-top:8px;">{result.get('notes','')}</div>
-            <div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {result.get('next_step','')}</div>
-        </div>
-        """,
+        f'<div style="border:1px solid {color}; border-radius:12px; padding:16px 18px; '
+        f'background:white; margin-bottom:12px;">{inner}</div>',
         unsafe_allow_html=True,
     )
     st.caption(f"Vector status: {result.get('vector_status','Unknown')}")
