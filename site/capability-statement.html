@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VDAM KC — Capability Statement</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2020%2020'%3E%3Cg%20stroke='%230B3D3A'%20stroke-width='1.5'%20fill='none'%3E%3Cline%20x1='3'%20y1='16'%20x2='10'%20y2='4'/%3E%3Cline%20x1='10'%20y1='4'%20x2='17'%20y2='12'/%3E%3Cline%20x1='3'%20y1='16'%20x2='17'%20y2='12'/%3E%3C/g%3E%3Ccircle%20cx='3'%20cy='16'%20r='2.6'%20fill='%232E9E6B'/%3E%3Ccircle%20cx='10'%20cy='4'%20r='2.6'%20fill='%230EA5E9'/%3E%3Ccircle%20cx='17'%20cy='12'%20r='2.6'%20fill='%23DC2626'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#0B3D3A;
+    --teal-dark:#082B29;
+    --blue:#0EA5E9;
+    --blue-deep:#0C4A6E;
+    --green:#2E9E6B;
+    --alert:#DC2626;
+    --risk-high:#EA580C;
+    --risk-moderate:#D97706;
+    --risk-low:#16A34A;
+    --ink:#0F211D;
+    --ink-soft:#4B5D58;
+    --line:#DCE6E2;
+    --surface-2:#EFF5F2;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'IBM Plex Sans', sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:#DDE5E2;
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:12px;
+    line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+  }
+  h1,h2,h3,h4{font-family:var(--font-display);margin:0;line-height:1.12;letter-spacing:-0.01em;}
+  p{margin:0;}
+  ul{margin:0;padding:0;list-style:none;}
+
+  /* ---- Sheet ---- */
+  .sheet{
+    width:210mm;
+    min-height:297mm;
+    margin:16px auto;
+    background:#fff;
+    box-shadow:0 6px 30px rgba(8,43,41,0.16);
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---- Header ---- */
+  .head{
+    background:var(--teal);
+    color:#fff;
+    padding:22px 26px 18px;
+  }
+  .head-top{display:flex;align-items:center;justify-content:space-between;gap:16px;}
+  .brand{display:flex;align-items:center;gap:11px;}
+  .brand svg{width:26px;height:26px;flex-shrink:0;}
+  .brand-name{font-family:var(--font-display);font-weight:600;font-size:22px;letter-spacing:.01em;}
+  .brand-tag{font-family:var(--font-mono);font-size:10px;color:#9FD9C4;letter-spacing:.06em;text-transform:uppercase;margin-top:2px;}
+  .doc-label{
+    font-family:var(--font-mono);font-size:10px;letter-spacing:.16em;
+    text-transform:uppercase;color:#8FE0BC;text-align:right;line-height:1.5;
+  }
+  .head-line{
+    margin-top:16px;font-family:var(--font-display);font-weight:500;
+    font-size:15px;color:#EAF5F0;max-width:640px;
+  }
+  .risk-rule{height:4px;width:100%;background:linear-gradient(90deg,var(--risk-low) 0%,var(--risk-moderate) 45%,var(--risk-high) 72%,var(--alert) 100%);}
+
+  /* ---- Body ---- */
+  .body{padding:22px 26px 10px;display:grid;grid-template-columns:1.62fr 1fr;gap:26px;flex:1;}
+  .eyebrow{
+    font-family:var(--font-mono);font-size:9.5px;letter-spacing:.13em;
+    text-transform:uppercase;color:var(--green);margin-bottom:9px;
+    display:flex;align-items:center;gap:8px;
+  }
+  .eyebrow::before{content:"";width:14px;height:1px;background:var(--green);}
+  .block{margin-bottom:19px;}
+  .block h2{font-size:14px;color:var(--teal);margin-bottom:7px;}
+  .block p{color:var(--ink-soft);}
+
+  .cap{margin-bottom:9px;}
+  .cap b{color:var(--teal);font-family:var(--font-display);font-weight:600;font-size:12px;display:block;margin-bottom:1px;}
+  .cap span{color:var(--ink-soft);}
+
+  .diff{display:grid;grid-template-columns:1fr;gap:6px;}
+  .diff li{padding-left:15px;position:relative;color:var(--ink-soft);}
+  .diff li::before{content:"";position:absolute;left:0;top:6px;width:6px;height:6px;border-radius:50%;background:var(--blue);}
+
+  /* ---- Sidebar ---- */
+  .side{border-left:1px solid var(--line);padding-left:24px;}
+  .side .eyebrow{color:var(--blue-deep);}
+  .side .eyebrow::before{background:var(--blue-deep);}
+  .founder-name{font-size:15px;color:var(--teal);}
+  .founder-role{font-family:var(--font-mono);font-size:10px;color:var(--green);letter-spacing:.03em;margin:2px 0 9px;}
+  .founder-bio{color:var(--ink-soft);margin-bottom:14px;}
+  .cred h4{font-family:var(--font-mono);font-size:9px;letter-spacing:.08em;text-transform:uppercase;color:var(--blue-deep);margin-bottom:5px;}
+  .cred ul{margin-bottom:12px;}
+  .cred li{color:var(--ink-soft);padding-left:12px;position:relative;margin-bottom:3px;}
+  .cred li::before{content:"–";position:absolute;left:0;color:var(--ink-soft);}
+
+  .partners li{color:var(--ink-soft);padding-left:12px;position:relative;margin-bottom:4px;}
+  .partners li::before{content:"›";position:absolute;left:0;color:var(--green);font-weight:600;}
+
+  /* ---- Footer contact band ---- */
+  .foot{
+    background:var(--teal-dark);color:#CFE6DC;
+    padding:14px 26px;
+    display:grid;grid-template-columns:repeat(3,1fr);gap:12px 16px;
+    margin-top:auto;
+  }
+  .foot dt{font-family:var(--font-mono);font-size:8.5px;letter-spacing:.08em;text-transform:uppercase;color:#8FE0BC;margin-bottom:3px;}
+  .foot dd{margin:0;font-size:11px;color:#EAF5F0;line-height:1.35;}
+  .foot .slot{font-style:italic;color:#7FA599;font-size:10px;}
+  .foot .disc{
+    grid-column:1 / -1;border-top:1px solid rgba(255,255,255,.12);
+    padding-top:9px;margin-top:3px;
+    font-family:var(--font-mono);font-size:8.5px;color:#7FA599;letter-spacing:.02em;
+  }
+
+  /* ---- Print ---- */
+  @page{size:A4;margin:0;}
+  @media print{
+    body{background:#fff;}
+    .sheet{margin:0;box-shadow:none;width:auto;min-height:auto;}
+    *{-webkit-print-color-adjust:exact;print-color-adjust:exact;}
+  }
+</style>
+</head>
+<body>
+<div class="sheet">
+
+  <!-- ===== Header ===== -->
+  <header class="head">
+    <div class="head-top">
+      <div class="brand">
+        <svg viewBox="0 0 20 20">
+          <g stroke="#EAF5F0" stroke-width="1.5" fill="none">
+            <line x1="3" y1="16" x2="10" y2="4"/><line x1="10" y1="4" x2="17" y2="12"/><line x1="3" y1="16" x2="17" y2="12"/>
+          </g>
+          <circle cx="3" cy="16" r="2.6" fill="#2E9E6B"/><circle cx="10" cy="4" r="2.6" fill="#0EA5E9"/><circle cx="17" cy="12" r="2.6" fill="#DC2626"/>
+        </svg>
+        <div>
+          <div class="brand-name">VDAM KC</div>
+          <div class="brand-tag">Vector Dynamics &amp; Malaria Knowledge for Control</div>
+        </div>
+      </div>
+      <div class="doc-label">Capability<br>Statement</div>
+    </div>
+    <div class="head-line">Turning mosquito field data into malaria control decisions — built for the realities of endemic regions.</div>
+  </header>
+  <div class="risk-rule"></div>
+
+  <!-- ===== Body ===== -->
+  <div class="body">
+
+    <!-- Main column -->
+    <div class="main">
+      <div class="block">
+        <div class="eyebrow">Who we are</div>
+        <p>VDAM KC is an independent vector-surveillance and analytics firm building tools that turn entomological field data into decisions for malaria control. We are designed for the conditions endemic regions actually face — patchy connectivity, multiple vector species, and rising insecticide resistance — and built so that the national programmes and field teams who use our tools can eventually own and run them themselves.</p>
+      </div>
+
+      <div class="block">
+        <div class="eyebrow">Core capabilities</div>
+        <div class="cap"><b>Field data capture</b><span>Offline-first logging of trap counts, larval-habitat surveys, and insecticide-resistance bioassays from a phone or tablet, with automatic sync once a signal returns.</span></div>
+        <div class="cap"><b>Species &amp; resistance tracking</b><span>Anopheles species composition and WHO-standard bioassay results tracked over time, with early flags for emerging insecticide resistance.</span></div>
+        <div class="cap"><b>AI-assisted specimen screening</b><span>Image- and morphological-key-based identification as a screening aid, with deliberate taxonomic guardrails — cryptic species complexes are never over-resolved beyond what the evidence supports.</span></div>
+        <div class="cap"><b>Risk scoring &amp; forecasting</b><span>Trap trends, rainfall, and clinical case data combined into rolling district-level risk scores and hotspot maps that update as new data arrives.</span></div>
+        <div class="cap"><b>Policy-ready reporting</b><span>Exports structured around the formats national malaria programmes already use for WHO reporting cycles.</span></div>
+      </div>
+
+      <div class="block">
+        <div class="eyebrow">What sets us apart</div>
+        <ul class="diff">
+          <li><b>Works where connectivity doesn't</b> — offline-first by design, built for rural trap networks rather than office Wi-Fi.</li>
+          <li><b>Species- and resistance-aware</b> — tracks what's actually driving transmission, not just raw trap counts.</li>
+          <li><b>Honest by design</b> — a screening aid, not a validated diagnostic device; our methods never claim more precision than the underlying data supports.</li>
+          <li><b>Built to be handed over</b> — structured so local teams and ministries can run it independently, not as a vendor dependency.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Sidebar -->
+    <div class="side">
+      <div class="block">
+        <div class="eyebrow">Leadership</div>
+        <div class="founder-name">Raphael Njapdze Kawep</div>
+        <div class="founder-role">Founder — Medical Entomologist &amp; Data Engineer</div>
+        <p class="founder-bio">Works at the intersection of field vector surveillance and applied data science — building the tools he wished existed during his own fieldwork.</p>
+
+        <div class="cred">
+          <h4>Education</h4>
+          <ul>
+            <li>B.Sc. Zoology (Second Class Upper), University of Maiduguri</li>
+            <li>M.Sc. candidate, Medical Entomology &amp; Parasitology</li>
+            <li>Diploma, Software Development</li>
+          </ul>
+          <h4>Field &amp; lab experience</h4>
+          <ul>
+            <li>Entomology Technician — National Institute of Medical Research (NIMR)</li>
+            <li>Entomology Technician — Anostep Africa</li>
+            <li>Insectary operations &amp; morphological vector identification</li>
+            <li>CDC light-trap deployment &amp; insecticide-resistance tracking</li>
+          </ul>
+          <h4>Technical</h4>
+          <ul>
+            <li>Python data analysis (Pandas)</li>
+            <li>Interactive dashboards (Streamlit)</li>
+            <li>Vector surveillance data pipelines</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="block">
+        <div class="eyebrow">Who we work with</div>
+        <ul class="partners">
+          <li>National malaria control programmes (NMPs)</li>
+          <li>Multilateral &amp; public-health agencies</li>
+          <li>Research institutions &amp; universities</li>
+          <li>Funders &amp; foundations</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Footer contact ===== -->
+  <dl class="foot">
+    <div><dt>Organization</dt><dd>VDAM KC — Vector Dynamics &amp; Malaria Knowledge for Control</dd></div>
+    <div><dt>Founder &amp; lead</dt><dd>Raphael Njapdze Kawep</dd></div>
+    <div><dt>Based in</dt><dd>Maiduguri, Borno State, Nigeria — working across Africa</dd></div>
+    <div><dt>Email &amp; phone</dt><dd>raphaelnjapdze@gmail.com<br><span class="slot">Phone / WhatsApp — add before sending</span></dd></div>
+    <div><dt>Website</dt><dd><span class="slot">www.vdamkc.com — add once live</span></dd></div>
+    <div><dt>Registered entity</dt><dd><span class="slot">Reg. no. — add once registered</span></dd></div>
+    <div class="disc">Focus areas: vector surveillance · insecticide-resistance monitoring · malaria risk analytics &nbsp;|&nbsp; Malaria burden figures cited elsewhere: WHO World Malaria Report 2025.</div>
+  </dl>
+
+</div>
+</body>
+</html>

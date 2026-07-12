@@ -1,0 +1,892 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VDAM KC — Vector Dynamics and Malaria Knowledge for Control</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2020%2020'%3E%3Cg%20stroke='%230B3D3A'%20stroke-width='1.5'%20fill='none'%3E%3Cline%20x1='3'%20y1='16'%20x2='10'%20y2='4'/%3E%3Cline%20x1='10'%20y1='4'%20x2='17'%20y2='12'/%3E%3Cline%20x1='3'%20y1='16'%20x2='17'%20y2='12'/%3E%3C/g%3E%3Ccircle%20cx='3'%20cy='16'%20r='2.6'%20fill='%232E9E6B'/%3E%3Ccircle%20cx='10'%20cy='4'%20r='2.6'%20fill='%230EA5E9'/%3E%3Ccircle%20cx='17'%20cy='12'%20r='2.6'%20fill='%23DC2626'/%3E%3C/svg%3E">
+<meta name="description" content="VDAM KC (Vector Dynamics and Malaria Knowledge for Control) is an independent vector-surveillance and analytics firm turning mosquito field data into malaria control decisions — built for endemic regions.">
+<meta name="author" content="VDAM KC">
+<meta name="theme-color" content="#0B3D3A">
+
+<!-- Canonical + social. TODO after deploy: replace https://REPLACE-WITH-YOUR-SITE.netlify.app with your real Netlify URL (or vdamkc.com once registered). -->
+<link rel="canonical" href="https://REPLACE-WITH-YOUR-SITE.netlify.app/">
+
+<!-- Open Graph (Facebook, LinkedIn, WhatsApp, Slack) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="VDAM KC">
+<meta property="og:title" content="VDAM KC — Vector Dynamics and Malaria Knowledge for Control">
+<meta property="og:description" content="Turning mosquito field data into malaria control decisions — vector surveillance and analytics for endemic regions.">
+<meta property="og:url" content="https://REPLACE-WITH-YOUR-SITE.netlify.app/">
+<meta property="og:image" content="https://REPLACE-WITH-YOUR-SITE.netlify.app/og-image.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="VDAM KC — a vector-surveillance network over a rising malaria-risk gradient">
+
+<!-- Twitter / X -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="VDAM KC — Vector Dynamics and Malaria Knowledge for Control">
+<meta name="twitter:description" content="Turning mosquito field data into malaria control decisions — vector surveillance and analytics for endemic regions.">
+<meta name="twitter:image" content="https://REPLACE-WITH-YOUR-SITE.netlify.app/og-image.png">
+<meta name="twitter:image:alt" content="VDAM KC — a vector-surveillance network over a rising malaria-risk gradient">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#F7FAF9;
+    --surface:#FFFFFF;
+    --surface-2:#EFF5F2;
+    --ink:#0F211D;
+    --ink-soft:#4B5D58;
+    --teal:#0B3D3A;         /* brand anchor */
+    --teal-dark:#082B29;
+    --blue:#0EA5E9;         /* app accent — sky (Vector Sentinel) */
+    --blue-deep:#0C4A6E;    /* app primary — depth */
+    --green:#2E9E6B;
+    /* risk scale — mirrors the app so map/dot semantics match */
+    --alert:#DC2626;        /* risk: critical */
+    --risk-high:#EA580C;
+    --risk-moderate:#D97706;
+    --risk-low:#16A34A;
+    --line:#DCE6E2;
+    --radius:2px;
+    --wrap:1180px;
+    --font-display:'Space Grotesk', sans-serif;
+    --font-body:'IBM Plex Sans', sans-serif;
+    --font-mono:'IBM Plex Mono', monospace;
+  }
+
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:var(--font-body);
+    font-size:16px;
+    line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  img{max-width:100%;display:block;}
+  a{color:inherit;text-decoration:none;}
+  h1,h2,h3,h4{font-family:var(--font-display);margin:0;line-height:1.1;letter-spacing:-0.01em;}
+  p{margin:0;}
+  ul{margin:0;padding:0;list-style:none;}
+  button{font-family:inherit;cursor:pointer;}
+
+  .wrap{max-width:var(--wrap);margin:0 auto;padding:0 32px;}
+
+  .eyebrow{
+    font-family:var(--font-mono);
+    font-size:12px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--green);
+    display:flex;
+    align-items:center;
+    gap:10px;
+    margin-bottom:18px;
+  }
+  .eyebrow::before{
+    content:"";
+    width:16px;height:1px;
+    background:var(--green);
+    display:inline-block;
+  }
+
+  /* ---------- Nav ---------- */
+  .nav{
+    position:sticky;top:0;z-index:100;
+    background:rgba(247,250,249,0.92);
+    backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);
+  }
+  .nav-inner{
+    max-width:var(--wrap);margin:0 auto;padding:0 32px;
+    display:flex;align-items:center;justify-content:space-between;
+    height:72px;
+  }
+  .logo{
+    display:flex;align-items:center;gap:10px;
+    font-family:var(--font-display);font-weight:600;font-size:19px;
+    color:var(--teal);
+  }
+  .logo-mark{width:20px;height:20px;flex-shrink:0;}
+  .logo-mark circle{fill:var(--green);}
+  .logo-mark circle.alt{fill:var(--blue);}
+  .logo-mark circle.crit{fill:var(--alert);}
+  .logo-mark line{stroke:var(--teal);stroke-width:1.4;}
+
+  .nav-links{display:flex;align-items:center;gap:2px;}
+  .nav-link{
+    font-family:var(--font-mono);
+    font-size:13px;
+    letter-spacing:0.03em;
+    padding:8px 14px;
+    color:var(--ink-soft);
+    border-radius:var(--radius);
+    transition:color .15s ease, background .15s ease;
+  }
+  .nav-link:hover{color:var(--teal);background:var(--surface-2);}
+  .nav-link.active{color:var(--teal);font-weight:600;}
+  .nav-cta{
+    margin-left:10px;
+    background:var(--teal);
+    color:#fff !important;
+    padding:9px 18px;
+    font-family:var(--font-mono);
+    font-size:13px;
+    border-radius:var(--radius);
+  }
+  .nav-cta:hover{background:var(--teal-dark);}
+
+  .nav-toggle{display:none;background:none;border:none;padding:8px;}
+  .nav-toggle span{display:block;width:22px;height:2px;background:var(--teal);margin:4px 0;}
+
+  /* ---------- Buttons ---------- */
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;
+    padding:13px 22px;
+    font-family:var(--font-mono);
+    font-size:13.5px;
+    letter-spacing:0.02em;
+    border-radius:var(--radius);
+    border:1px solid transparent;
+    transition:transform .15s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn-primary{background:var(--green);color:#fff;}
+  .btn-primary:hover{background:#268a5c;}
+  .btn-outline{border-color:var(--teal);color:var(--teal);}
+  .btn-outline:hover{background:var(--teal);color:#fff;}
+  .btn-arrow::after{content:"→";transition:transform .15s ease;}
+  .btn-arrow:hover::after{transform:translateX(3px);}
+
+  /* ---------- Page control ---------- */
+  .page{display:none;}
+  .page.active{display:block;animation:fadeIn .35s ease;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  section{padding:88px 0;}
+  .section-tight{padding:64px 0;}
+  .section-alt{background:var(--surface);}
+  .section-teal{background:var(--teal);color:#fff;}
+  .section-teal .eyebrow{color:#8FE0BC;}
+  .section-teal .eyebrow::before{background:#8FE0BC;}
+
+  /* ---------- Hero ---------- */
+  .hero{padding:76px 0 60px;}
+  .hero-grid{display:grid;grid-template-columns:1.05fr 0.95fr;gap:56px;align-items:center;}
+  .hero h1{font-size:52px;color:var(--teal);margin-bottom:22px;}
+  .hero p.lead{font-size:18px;color:var(--ink-soft);max-width:520px;margin-bottom:34px;}
+  .hero-actions{display:flex;gap:14px;flex-wrap:wrap;}
+  .hero-visual{position:relative;}
+
+  .node-dot{transform-box:fill-box;transform-origin:center;animation:pulse 3.2s ease-in-out infinite;}
+  .node-dot.alert{animation-duration:2.2s;}
+  .node-ring{transform-box:fill-box;transform-origin:center;animation:ring 3.2s ease-out infinite;}
+  @keyframes pulse{0%,100%{transform:scale(1);opacity:.85;}50%{transform:scale(1.28);opacity:1;}}
+  @keyframes ring{0%{transform:scale(.6);opacity:.55;}100%{transform:scale(2.1);opacity:0;}}
+  @media (prefers-reduced-motion: reduce){
+    .node-dot,.node-ring{animation:none;}
+  }
+
+  /* ---------- Stats strip ---------- */
+  .stats{
+    display:grid;grid-template-columns:repeat(4,1fr);
+    border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+  }
+  .stat{
+    padding:30px 28px;border-left:1px solid var(--line);
+  }
+  .stat:first-child{border-left:none;}
+  .stat-num{font-family:var(--font-mono);font-size:34px;font-weight:600;color:var(--teal);}
+  .stat-label{font-size:14px;color:var(--ink-soft);margin-top:6px;max-width:220px;}
+  .stats-source{
+    font-family:var(--font-mono);font-size:11.5px;color:var(--ink-soft);
+    text-align:right;padding:10px 0 0;
+  }
+
+  /* ---------- Divider ---------- */
+  .net-divider{display:block;width:100%;height:28px;margin:0 auto;opacity:.5;}
+
+  /* ---------- Generic section heading ---------- */
+  .section-head{max-width:640px;margin-bottom:52px;}
+  .section-head h2{font-size:34px;color:var(--teal);}
+  .section-head p{color:var(--ink-soft);font-size:16.5px;margin-top:14px;}
+  .section-teal .section-head h2{color:#fff;}
+  .section-teal .section-head p{color:#CFE6DC;}
+
+  /* ---------- Steps ---------- */
+  .steps{display:grid;grid-template-columns:repeat(3,1fr);gap:36px;}
+  .step-num{font-family:var(--font-mono);font-size:13px;color:var(--green);margin-bottom:14px;}
+  .step h3{font-size:20px;margin-bottom:10px;}
+  .step p{color:var(--ink-soft);font-size:15px;}
+
+  /* ---------- Cards grid ---------- */
+  .grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;}
+  .grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:28px;}
+  .card{
+    background:var(--surface);border:1px solid var(--line);
+    padding:30px 26px;border-radius:var(--radius);
+  }
+  .card h3{font-size:18px;margin-bottom:10px;color:var(--teal);}
+  .card p{color:var(--ink-soft);font-size:14.5px;}
+  .card-icon{width:34px;height:34px;margin-bottom:16px;}
+
+  /* ---------- CTA banner ---------- */
+  .cta-banner{
+    display:flex;align-items:center;justify-content:space-between;gap:24px;
+    flex-wrap:wrap;
+  }
+  .cta-banner h2{font-size:28px;color:#fff;max-width:520px;}
+
+  /* ---------- Dashboard mockup ---------- */
+  .mock{
+    background:var(--teal-dark);
+    border-radius:6px;
+    padding:18px;
+    display:grid;
+    grid-template-columns:1.3fr 1fr;
+    gap:14px;
+  }
+  .mock-panel{background:rgba(255,255,255,0.06);border-radius:4px;padding:14px;}
+  .mock-label{font-family:var(--font-mono);font-size:11px;color:#8FE0BC;letter-spacing:.06em;text-transform:uppercase;margin-bottom:10px;}
+  .mock-note{
+    font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);
+    margin-top:10px;text-align:center;
+  }
+
+  /* ---------- Team ---------- */
+  .team-note{
+    font-family:var(--font-mono);font-size:13px;color:var(--ink-soft);
+    background:var(--surface-2);border:1px dashed var(--line);
+    padding:14px 18px;border-radius:var(--radius);margin-bottom:44px;
+  }
+  .team-card{text-align:left;}
+  .avatar{
+    width:64px;height:64px;border-radius:50%;
+    background:var(--surface-2);border:1px solid var(--line);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-mono);color:var(--ink-soft);font-size:13px;
+    margin-bottom:16px;
+  }
+
+  /* ---------- Founder profile ---------- */
+  .founder-wrap{display:flex;gap:32px;align-items:flex-start;margin-bottom:52px;flex-wrap:wrap;}
+  .founder-avatar{
+    width:92px;height:92px;border-radius:50%;flex-shrink:0;
+    background:var(--teal);color:#fff;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-display);font-size:26px;font-weight:600;
+  }
+  .founder-name{font-size:23px;color:var(--teal);margin-bottom:4px;}
+  .founder-role{font-family:var(--font-mono);font-size:13px;color:var(--green);margin-bottom:14px;letter-spacing:.02em;}
+  .founder-bio{color:var(--ink-soft);font-size:15.5px;max-width:560px;}
+
+  .credential-cols{display:grid;grid-template-columns:repeat(3,1fr);gap:30px;margin-bottom:56px;}
+  .credential-col h4{
+    font-family:var(--font-mono);font-size:11px;letter-spacing:.07em;
+    text-transform:uppercase;color:var(--green);margin-bottom:14px;
+  }
+  .credential-col li{
+    font-size:14px;color:var(--ink-soft);margin-bottom:9px;
+    padding-left:14px;position:relative;
+  }
+  .credential-col li::before{content:"–";position:absolute;left:0;color:var(--ink-soft);}
+
+  .pull-quote{
+    border-left:3px solid var(--green);
+    padding:4px 0 4px 24px;
+    font-family:var(--font-display);font-size:19px;font-weight:500;
+    color:var(--teal);font-style:normal;max-width:680px;margin:0;
+  }
+  .pull-quote cite{
+    display:block;margin-top:16px;font-family:var(--font-mono);
+    font-size:12.5px;color:var(--ink-soft);font-style:normal;
+  }
+
+  /* ---------- Research ---------- */
+  .post-card{border-bottom:1px solid var(--line);padding:26px 0;display:flex;justify-content:space-between;gap:24px;}
+  .post-card:first-child{padding-top:0;}
+  .post-date{font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);white-space:nowrap;padding-top:4px;}
+  .post-tag{
+    display:inline-block;font-family:var(--font-mono);font-size:10.5px;
+    color:var(--green);border:1px solid var(--green);border-radius:2px;
+    padding:2px 6px;margin-bottom:8px;letter-spacing:.05em;
+  }
+  .post-card h3{font-size:19px;margin-bottom:6px;color:var(--teal);}
+  .post-card p{color:var(--ink-soft);font-size:14.5px;max-width:520px;}
+
+  /* ---------- Values ---------- */
+  .values{display:grid;grid-template-columns:repeat(2,1fr);gap:2px;background:var(--line);border:1px solid var(--line);}
+  .value{background:var(--surface);padding:30px;}
+  .value h3{font-size:17px;color:var(--teal);margin-bottom:8px;}
+  .value p{color:var(--ink-soft);font-size:14.5px;}
+
+  /* ---------- Contact ---------- */
+  .contact-grid{display:grid;grid-template-columns:1fr 1fr;gap:56px;}
+  .field{margin-bottom:18px;}
+  .field label{
+    display:block;font-family:var(--font-mono);font-size:12px;
+    color:var(--ink-soft);margin-bottom:6px;letter-spacing:.03em;
+  }
+  .field input,.field textarea{
+    width:100%;padding:12px 14px;font-family:var(--font-body);font-size:14.5px;
+    border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);color:var(--ink);
+  }
+  .field input:focus,.field textarea:focus{outline:2px solid var(--green);outline-offset:1px;}
+  .form-note{
+    font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);
+    margin-top:14px;
+  }
+  .form-status{
+    font-family:var(--font-mono);font-size:13px;color:var(--green);
+    margin-top:14px;display:none;
+  }
+  .contact-info dt{font-family:var(--font-mono);font-size:12px;color:var(--green);margin-bottom:4px;letter-spacing:.04em;text-transform:uppercase;}
+  .contact-info dd{margin:0 0 26px 0;font-size:15.5px;}
+
+  /* ---------- Footer ---------- */
+  footer{background:var(--teal-dark);color:#CFE6DC;padding:52px 0 26px;}
+  .footer-top{display:flex;justify-content:space-between;gap:40px;flex-wrap:wrap;margin-bottom:34px;}
+  .footer-logo{font-family:var(--font-display);font-weight:600;font-size:18px;color:#fff;margin-bottom:10px;}
+  .footer-tag{font-size:14px;max-width:280px;color:#9FC2B6;}
+  .footer-cols{display:flex;gap:56px;flex-wrap:wrap;}
+  .footer-col h4{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:#8FE0BC;margin-bottom:14px;}
+  .footer-col a{display:block;font-size:14px;color:#CFE6DC;margin-bottom:9px;}
+  .footer-col a:hover{color:#fff;}
+  .footer-bottom{
+    border-top:1px solid rgba(255,255,255,0.12);padding-top:20px;
+    display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px;
+    font-family:var(--font-mono);font-size:11.5px;color:#7FA599;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width:900px){
+    .hero-grid{grid-template-columns:1fr;}
+    .hero-visual{order:-1;max-width:340px;margin:0 auto;}
+    .stats{grid-template-columns:repeat(2,1fr);}
+    .stat:nth-child(3){border-left:none;}
+    .steps,.grid-3{grid-template-columns:1fr;}
+    .grid-2,.values,.contact-grid,.mock,.credential-cols{grid-template-columns:1fr;}
+    .founder-wrap{align-items:center;text-align:center;flex-direction:column;}
+    .nav-links{
+      position:fixed;top:72px;left:0;right:0;bottom:0;
+      background:var(--bg);flex-direction:column;align-items:stretch;
+      padding:20px 24px;gap:4px;
+      transform:translateX(100%);transition:transform .2s ease;
+      overflow-y:auto;
+    }
+    .nav-links.open{transform:translateX(0);}
+    .nav-link{padding:14px 6px;border-bottom:1px solid var(--line);}
+    .nav-cta{margin:14px 6px 0;text-align:center;justify-content:center;}
+    .nav-toggle{display:block;}
+    .hero h1{font-size:36px;}
+    .section-head h2{font-size:27px;}
+    section{padding:56px 0;}
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="#home" class="logo" data-page-link="home">
+      <svg class="logo-mark" viewBox="0 0 20 20"><line x1="3" y1="16" x2="10" y2="4"/><line x1="10" y1="4" x2="17" y2="12"/><line x1="3" y1="16" x2="17" y2="12"/><circle cx="3" cy="16" r="2.4"/><circle cx="10" cy="4" r="2.4" class="alt"/><circle cx="17" cy="12" r="2.4" class="crit"/></svg>
+      VDAM KC
+    </a>
+    <button class="nav-toggle" aria-label="Toggle menu" onclick="document.querySelector('.nav-links').classList.toggle('open')">
+      <span></span><span></span><span></span>
+    </button>
+    <div class="nav-links">
+      <a href="#home" class="nav-link" data-page-link="home">Home</a>
+      <a href="#solution" class="nav-link" data-page-link="solution">Solution</a>
+      <a href="#about" class="nav-link" data-page-link="about">About</a>
+      <a href="#research" class="nav-link" data-page-link="research">Research</a>
+      <a href="#team" class="nav-link" data-page-link="team">Team</a>
+      <a href="#partners" class="nav-link" data-page-link="partners">Partners</a>
+      <a href="#contact" class="nav-link" data-page-link="contact">Contact</a>
+      <a href="#contact" class="nav-cta" data-page-link="contact">Request a demo</a>
+    </div>
+  </div>
+</nav>
+
+<main>
+
+<!-- ============ HOME ============ -->
+<section class="page" id="page-home">
+  <div class="wrap hero">
+    <div class="hero-grid">
+      <div>
+        <div class="eyebrow">Vector surveillance, field to policy</div>
+        <h1>Turning mosquito data into malaria decisions.</h1>
+        <p class="lead">VDAM KC — short for Vector Dynamics and Malaria Knowledge for Control — is a surveillance and analytics platform for vector-borne disease control — built for the realities of endemic regions: patchy connectivity, multiple vector species, and rising insecticide resistance. We help teams see risk before it becomes an outbreak.</p>
+        <div class="hero-actions">
+          <a href="#contact" class="btn btn-primary btn-arrow" data-page-link="contact">Request a demo</a>
+          <a href="#solution" class="btn btn-outline" data-page-link="solution">View the platform</a>
+        </div>
+      </div>
+      <div class="hero-visual">
+        <svg viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
+          <g stroke="#0B3D3A" stroke-opacity="0.35" stroke-width="1.2" fill="none">
+            <line x1="80" y1="120" x2="160" y2="60"/>
+            <line x1="160" y1="60" x2="260" y2="90"/>
+            <line x1="260" y1="90" x2="340" y2="140"/>
+            <line x1="340" y1="140" x2="400" y2="220"/>
+            <line x1="400" y1="220" x2="360" y2="320"/>
+            <line x1="360" y1="320" x2="280" y2="380"/>
+            <line x1="280" y1="380" x2="180" y2="360"/>
+            <line x1="180" y1="360" x2="100" y2="300"/>
+            <line x1="100" y1="300" x2="60" y2="200"/>
+            <line x1="60" y1="200" x2="80" y2="120"/>
+            <line x1="160" y1="60" x2="150" y2="150"/>
+            <line x1="150" y1="150" x2="200" y2="200"/>
+            <line x1="200" y1="200" x2="240" y2="260"/>
+            <line x1="240" y1="260" x2="320" y2="200"/>
+            <line x1="320" y1="200" x2="340" y2="140"/>
+            <line x1="200" y1="200" x2="80" y2="120"/>
+            <line x1="240" y1="260" x2="280" y2="380"/>
+            <line x1="320" y1="200" x2="400" y2="220"/>
+          </g>
+          <!-- alert rings -->
+          <circle class="node-ring" cx="240" cy="260" r="10" fill="none" stroke="#DC2626" stroke-width="1.6"/>
+          <circle class="node-ring" cx="150" cy="150" r="9" fill="none" stroke="#0EA5E9" stroke-width="1.6" style="animation-delay:.6s"/>
+
+          <g>
+            <circle class="node-dot" cx="80" cy="120" r="6" fill="#2E9E6B"/>
+            <circle class="node-dot" cx="160" cy="60" r="6" fill="#0EA5E9" style="animation-delay:.2s"/>
+            <circle class="node-dot" cx="260" cy="90" r="6" fill="#D97706" style="animation-delay:.5s"/>
+            <circle class="node-dot" cx="340" cy="140" r="6" fill="#EA580C" style="animation-delay:.1s"/>
+            <circle class="node-dot alert" cx="400" cy="220" r="7" fill="#DC2626" style="animation-delay:.3s"/>
+            <circle class="node-dot" cx="360" cy="320" r="6" fill="#2E9E6B" style="animation-delay:.7s"/>
+            <circle class="node-dot" cx="280" cy="380" r="6" fill="#0EA5E9" style="animation-delay:.4s"/>
+            <circle class="node-dot" cx="180" cy="360" r="6" fill="#2E9E6B" style="animation-delay:.9s"/>
+            <circle class="node-dot" cx="100" cy="300" r="6" fill="#2E9E6B" style="animation-delay:.15s"/>
+            <circle class="node-dot" cx="60" cy="200" r="6" fill="#0EA5E9" style="animation-delay:.55s"/>
+            <circle class="node-dot alert" cx="240" cy="260" r="7.5" fill="#DC2626" style="animation-delay:0s"/>
+            <circle class="node-dot" cx="150" cy="150" r="6" fill="#0EA5E9" style="animation-delay:.65s"/>
+            <circle class="node-dot" cx="200" cy="200" r="6" fill="#2E9E6B" style="animation-delay:.35s"/>
+            <circle class="node-dot" cx="320" cy="200" r="6" fill="#2E9E6B" style="animation-delay:.8s"/>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="stats">
+      <div class="stat"><div class="stat-num">282M</div><div class="stat-label">estimated malaria cases worldwide, 2024</div></div>
+      <div class="stat"><div class="stat-num">610K</div><div class="stat-label">malaria deaths in 2024</div></div>
+      <div class="stat"><div class="stat-num">95%</div><div class="stat-label">of deaths occurred in the WHO African Region</div></div>
+      <div class="stat"><div class="stat-num">75%</div><div class="stat-label">of African deaths were children under five</div></div>
+    </div>
+    <div class="stats-source">Source: WHO World Malaria Report 2025</div>
+  </div>
+
+  <div class="wrap section-tight">
+    <div class="section-head">
+      <div class="eyebrow">How it works</div>
+      <h2>From a trap in the field to a decision at the ministry</h2>
+      <p>Three steps, running continuously, not as a one-off report.</p>
+    </div>
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01 — Collect</div>
+        <h3>Field data, on or offline</h3>
+        <p>Field teams log trap counts, larval habitat surveys, and insecticide-resistance bioassays from a phone or tablet, with or without a signal.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02 — Analyze</div>
+        <h3>Raw counts become risk</h3>
+        <p>VDAM KC turns species-level counts and resistance results into district-level risk scores and hotspot maps, updated as new data arrives.</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03 — Act</div>
+        <h3>Resources follow the model</h3>
+        <p>National malaria programmes and partners direct nets, spraying, and larviciding to the areas the data shows are rising — before case counts spike.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-alt">
+    <div class="wrap">
+      <div class="section-head">
+        <div class="eyebrow">Why VDAM KC</div>
+        <h2>Built for endemic-region conditions, not a demo environment</h2>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <h3>Works where connectivity doesn't</h3>
+          <p>Offline-first data capture, with automatic sync. Designed for rural trap networks, not office Wi-Fi.</p>
+        </div>
+        <div class="card">
+          <h3>Species- and resistance-aware</h3>
+          <p>Tracks Anopheles species composition and insecticide-resistance bioassay results over time — not just raw trap counts.</p>
+        </div>
+        <div class="card">
+          <h3>Report-ready, not just chart-ready</h3>
+          <p>Exports in the formats national malaria programmes already use for WHO reporting cycles, so the dashboard fits existing workflows.</p>
+        </div>
+        <div class="card">
+          <h3>Built to be handed over</h3>
+          <p>Designed so local teams and ministries can run it independently over time — a tool their programme owns, not a vendor dependency.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-teal">
+    <div class="wrap cta-banner">
+      <h2>Building the surveillance backbone for malaria elimination — one endemic region at a time.</h2>
+      <a href="#partners" class="btn btn-primary btn-arrow" data-page-link="partners">Partner with us</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SOLUTION ============ -->
+<section class="page" id="page-solution">
+  <div class="wrap" style="padding-top:64px;">
+    <div class="section-head">
+      <div class="eyebrow">The platform</div>
+      <h2>One dashboard, from trap data to policy</h2>
+      <p>VDAM KC brings entomological field data, resistance testing, and case data into a single working view — built for the people who actually have to act on it: field supervisors, entomologists, and national malaria programme staff.</p>
+    </div>
+
+    <div class="mock">
+      <div class="mock-panel">
+        <div class="mock-label">Live network map</div>
+        <svg viewBox="0 0 300 180" style="width:100%;">
+          <g stroke="#8FE0BC" stroke-opacity="0.3" stroke-width="1"><line x1="30" y1="140" x2="90" y2="60"/><line x1="90" y1="60" x2="160" y2="90"/><line x1="160" y1="90" x2="230" y2="50"/><line x1="230" y1="50" x2="270" y2="120"/><line x1="270" y1="120" x2="190" y2="150"/><line x1="190" y1="150" x2="100" y2="130"/><line x1="100" y1="130" x2="30" y2="140"/></g>
+          <circle cx="30" cy="140" r="5" fill="#2E9E6B"/><circle cx="90" cy="60" r="5" fill="#2E9E6B"/><circle cx="160" cy="90" r="5" fill="#DC2626"/><circle cx="230" cy="50" r="5" fill="#EA580C"/><circle cx="270" cy="120" r="5" fill="#0EA5E9"/><circle cx="190" cy="150" r="5" fill="#DC2626"/><circle cx="100" cy="130" r="5" fill="#2E9E6B"/>
+        </svg>
+      </div>
+      <div class="mock-panel">
+        <div class="mock-label">District risk trend</div>
+        <svg viewBox="0 0 200 140" style="width:100%;">
+          <defs>
+            <linearGradient id="riskTrend" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#16A34A"/>
+              <stop offset="0.55" stop-color="#D97706"/>
+              <stop offset="1" stop-color="#DC2626"/>
+            </linearGradient>
+          </defs>
+          <polyline points="10,110 40,95 70,100 100,60 130,70 160,30 190,40" fill="none" stroke="url(#riskTrend)" stroke-width="2.5"/>
+          <line x1="10" y1="130" x2="190" y2="130" stroke="#8FE0BC" stroke-opacity="0.3"/>
+        </svg>
+      </div>
+    </div>
+    <div class="mock-note">Illustrative interface — sample data, not a live customer environment.</div>
+  </div>
+
+  <div class="wrap section-tight">
+    <div class="grid-3">
+      <div class="card">
+        <h3>Live network map</h3>
+        <p>Every trap and breeding site plotted and color-coded by current risk level, refreshed as field data arrives.</p>
+      </div>
+      <div class="card">
+        <h3>Species &amp; resistance tracking</h3>
+        <p>Logs Anopheles species composition and bioassay results over time, and flags emerging insecticide resistance early.</p>
+      </div>
+      <div class="card">
+        <h3>Outbreak risk scoring</h3>
+        <p>Combines trap trends, rainfall, and case data into a rolling risk score per district — a ranked list, not just a map.</p>
+      </div>
+      <div class="card">
+        <h3>Offline-first capture</h3>
+        <p>Field agents log data with no signal. The platform queues it locally and syncs automatically once connected.</p>
+      </div>
+      <div class="card">
+        <h3>Policy-ready exports</h3>
+        <p>Generates reports formatted for national malaria programmes and WHO reporting cycles — no manual reformatting.</p>
+      </div>
+      <div class="card">
+        <h3>Role-based access</h3>
+        <p>Ministries, field teams, and partner organizations each get the view relevant to their work, nothing more.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-alt">
+    <div class="wrap cta-banner" style="color:var(--ink);">
+      <h2 style="color:var(--teal);">Want to see it against your own region's data?</h2>
+      <a href="#contact" class="btn btn-primary btn-arrow" data-page-link="contact">Request a demo</a>
+    </div>
+  </div>
+</section>
+
+<!-- ============ ABOUT ============ -->
+<section class="page" id="page-about">
+  <div class="wrap" style="padding-top:64px;">
+    <div class="section-head">
+      <div class="eyebrow">Our story</div>
+      <h2>Built to outlast a single product</h2>
+      <p>VDAM KC — Vector Dynamics and Malaria Knowledge for Control — started with a dashboard — a way to make vector surveillance data usable for the people fighting malaria on the ground. The long-term goal is bigger: an independent firm that can stand on its own and work alongside the major organizations already active in this fight, especially across endemic regions in Africa.</p>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:64px;">
+      <div>
+        <h3 style="font-size:20px;color:var(--teal);margin-bottom:12px;">Where we're starting</h3>
+        <p style="color:var(--ink-soft);font-size:15px;">A focused surveillance and analytics dashboard for vector-borne disease control — built by a founder who has done the fieldwork himself, from insectary operations to CDC light-trap deployment, and now writes the code to make sense of that data.</p>
+      </div>
+      <div>
+        <h3 style="font-size:20px;color:var(--teal);margin-bottom:12px;">Where we're headed</h3>
+        <p style="color:var(--ink-soft);font-size:15px;">A standalone firm capable of partnering with national programmes, research institutions, and global health organizations — building tools that endemic-region teams can eventually own and run themselves.</p>
+      </div>
+    </div>
+
+    <div class="section-head">
+      <div class="eyebrow">What we hold to</div>
+      <h2 style="font-size:28px;">Four things that don't change as we grow</h2>
+    </div>
+    <div class="values">
+      <div class="value"><h3>Rigor</h3><p>Every risk score traces back to real field data. No dashboard number without a method behind it.</p></div>
+      <div class="value"><h3>Local partnership</h3><p>We build with the teams who will use this daily, in the regions where it matters — not for them from a distance.</p></div>
+      <div class="value"><h3>Open collaboration</h3><p>We design to plug into the tools and reporting formats health systems already use, rather than asking them to switch.</p></div>
+      <div class="value"><h3>Long-term commitment</h3><p>Malaria elimination is a decades-long effort. We're building a company structured to still be here for it.</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ RESEARCH ============ -->
+<section class="page" id="page-research">
+  <div class="wrap" style="padding-top:64px;">
+    <div class="section-head">
+      <div class="eyebrow">Research &amp; insights</div>
+      <h2>Notes from the field and the data</h2>
+      <p>Field notes and resistance-surveillance writeups are in progress — the first pieces will publish here soon. Here's what we're working on.</p>
+    </div>
+
+    <div>
+      <div class="post-card">
+        <div>
+          <div class="post-tag">In progress</div>
+          <h3>Why insecticide-resistance surveillance can't wait for the next outbreak</h3>
+          <p>On the case for continuous bioassay tracking rather than periodic spot-checks, and what it changes about response timing.</p>
+        </div>
+        <div class="post-date">Coming soon</div>
+      </div>
+      <div class="post-card">
+        <div>
+          <div class="post-tag">In progress</div>
+          <h3>Mapping the urban spread of Anopheles stephensi</h3>
+          <p>An invasive vector species is showing up in more African cities. What that means for surveillance built around rural transmission patterns.</p>
+        </div>
+        <div class="post-date">Coming soon</div>
+      </div>
+      <div class="post-card">
+        <div>
+          <div class="post-tag">In progress</div>
+          <h3>What offline-first design actually means for rural trap networks</h3>
+          <p>Notes on building data capture that assumes no signal as the default, not the exception.</p>
+        </div>
+        <div class="post-date">Coming soon</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TEAM ============ -->
+<section class="page" id="page-team">
+  <div class="wrap" style="padding-top:64px;">
+    <div class="section-head">
+      <div class="eyebrow">The team</div>
+      <h2>Currently a team of one — built to grow</h2>
+      <p>VDAM KC is led by its founder for now, with the entomology and engineering background to build the first version hands-on.</p>
+    </div>
+
+    <div class="founder-wrap">
+      <div class="founder-avatar">RNK</div>
+      <div>
+        <div class="founder-name">Raphael Njapdze Kawep</div>
+        <div class="founder-role">Founder, VDAM KC</div>
+        <p class="founder-bio">A medical entomologist and data engineer working at the intersection of field vector surveillance and applied data science — building the tools he wished existed during his own fieldwork.</p>
+      </div>
+    </div>
+
+    <div class="credential-cols">
+      <div class="credential-col">
+        <h4>Education</h4>
+        <ul>
+          <li>B.Sc. Zoology (Second Class Upper), University of Maiduguri</li>
+          <li>M.Sc. candidate, Medical Entomology &amp; Parasitology</li>
+          <li>Diploma, Software Development</li>
+        </ul>
+      </div>
+      <div class="credential-col">
+        <h4>Field &amp; lab experience</h4>
+        <ul>
+          <li>Entomology Technician, National Institute of Medical Research (NIMR)</li>
+          <li>Entomology Technician, Anostep Africa</li>
+          <li>Insectary operations &amp; morphological vector identification</li>
+          <li>CDC light-trap deployment &amp; insecticide-resistance tracking</li>
+        </ul>
+      </div>
+      <div class="credential-col">
+        <h4>Technical skills</h4>
+        <ul>
+          <li>Python for data analysis (Pandas)</li>
+          <li>Interactive dashboards (Streamlit)</li>
+          <li>Vector surveillance data pipelines</li>
+        </ul>
+      </div>
+    </div>
+
+    <blockquote class="pull-quote">
+      "My commitment to combating malaria was sparked during hands-on field surveillance and insectary work, where I saw first-hand the impact of vector-borne disease on public health. That's what led me to combine medical entomology with software engineering — building smarter, data-driven vector control tools."
+      <cite>— Raphael Njapdze Kawep, Founder</cite>
+    </blockquote>
+  </div>
+</section>
+
+<!-- ============ PARTNERS ============ -->
+<section class="page" id="page-partners">
+  <div class="wrap" style="padding-top:64px;">
+    <div class="section-head">
+      <div class="eyebrow">Collaboration</div>
+      <h2>Built to work alongside the institutions already fighting this</h2>
+      <p>VDAM KC isn't trying to replace national malaria programmes or global health institutions — it's built to give them a better working view of their own vector data, and to grow into a partner capable of standing alongside them.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <h3>National malaria control programmes</h3>
+        <p>Surveillance data structured around how NMPs already plan and report, so it strengthens existing programmes rather than sitting outside them.</p>
+      </div>
+      <div class="card">
+        <h3>Multilateral &amp; public health agencies</h3>
+        <p>Data and reporting built to align with the formats and standards used across the wider global health response.</p>
+      </div>
+      <div class="card">
+        <h3>Research institutions &amp; universities</h3>
+        <p>Open to collaborations on entomological research, resistance monitoring, and field validation studies.</p>
+      </div>
+      <div class="card">
+        <h3>Funders &amp; foundations</h3>
+        <p>A platform designed to make the impact of surveillance investment visible and measurable over time.</p>
+      </div>
+    </div>
+    <div class="section-tight" style="padding-bottom:0;">
+      <div class="cta-banner" style="background:var(--surface-2);padding:30px 30px;border-radius:4px;">
+        <h2 style="color:var(--teal);font-size:24px;">Working on a surveillance or elimination programme? Let's talk.</h2>
+        <a href="#contact" class="btn btn-primary btn-arrow" data-page-link="contact">Start a conversation</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CONTACT ============ -->
+<section class="page" id="page-contact">
+  <div class="wrap" style="padding-top:64px;">
+    <div class="section-head">
+      <div class="eyebrow">Get in touch</div>
+      <h2>Let's talk about your surveillance data</h2>
+      <p>Whether you're a ministry, a research partner, or a funder — tell us a little about what you're working on.</p>
+    </div>
+    <div class="contact-grid">
+      <form id="contact-form">
+        <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" required></div>
+        <div class="field"><label for="f-org">Organization</label><input id="f-org" type="text"></div>
+        <div class="field"><label for="f-email">Email</label><input id="f-email" type="email" required></div>
+        <div class="field"><label for="f-msg">Message</label><textarea id="f-msg" rows="5" required></textarea></div>
+        <button type="submit" class="btn btn-primary">Send message</button>
+        <div class="form-status" id="form-status">Opening your email app — if nothing happens, email raphaelnjapdze@gmail.com directly.</div>
+        <div class="form-note">Sends through your own email app — nothing is stored on this site.</div>
+      </form>
+      <dl class="contact-info">
+        <dt>Email</dt><dd>raphaelnjapdze@gmail.com</dd>
+        <dt>Based in</dt><dd>Maiduguri, Borno State, Nigeria — working across Africa</dd>
+        <dt>For partnership inquiries</dt><dd>Ministries, NMPs, and research institutions are welcome to reach out directly.</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="footer-top">
+      <div>
+        <div class="footer-logo">VDAM KC</div>
+        <div class="footer-tag">Vector Dynamics and Malaria Knowledge for Control — surveillance intelligence for malaria elimination in endemic regions.</div>
+      </div>
+      <div class="footer-cols">
+        <div class="footer-col">
+          <h4>Site</h4>
+          <a href="#home" data-page-link="home">Home</a>
+          <a href="#solution" data-page-link="solution">Solution</a>
+          <a href="#about" data-page-link="about">About</a>
+        </div>
+        <div class="footer-col">
+          <h4>More</h4>
+          <a href="#research" data-page-link="research">Research</a>
+          <a href="#team" data-page-link="team">Team</a>
+          <a href="#partners" data-page-link="partners">Partners</a>
+        </div>
+        <div class="footer-col">
+          <h4>Contact</h4>
+          <a href="#contact" data-page-link="contact">Get in touch</a>
+        </div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>© 2026 VDAM KC — Vector Dynamics and Malaria Knowledge for Control.</span>
+      <span>Malaria data: WHO World Malaria Report 2025</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const pages = ['home','solution','about','research','team','partners','contact'];
+
+  function showPage(name){
+    if(!pages.includes(name)) name = 'home';
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    const target = document.getElementById('page-' + name);
+    if(target) target.classList.add('active');
+    document.querySelectorAll('[data-page-link]').forEach(l => {
+      l.classList.toggle('active', l.getAttribute('data-page-link') === name && l.classList.contains('nav-link'));
+    });
+    window.scrollTo({top:0, behavior:'instant' in window ? 'instant' : 'auto'});
+    document.querySelector('.nav-links').classList.remove('open');
+  }
+
+  document.querySelectorAll('[data-page-link]').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      const name = link.getAttribute('data-page-link');
+      history.pushState(null, '', '#' + name);
+      showPage(name);
+    });
+  });
+
+  window.addEventListener('popstate', () => {
+    showPage(location.hash.replace('#','') || 'home');
+  });
+
+  showPage(location.hash.replace('#','') || 'home');
+
+  document.getElementById('contact-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    const name  = document.getElementById('f-name').value.trim();
+    const org   = document.getElementById('f-org').value.trim();
+    const email = document.getElementById('f-email').value.trim();
+    const msg   = document.getElementById('f-msg').value.trim();
+    const subject = 'VDAM KC enquiry — ' + (name || 'website');
+    const body =
+      'Name: ' + name +
+      '\nOrganization: ' + org +
+      '\nEmail: ' + email +
+      '\n\n' + msg;
+    window.location.href =
+      'mailto:raphaelnjapdze@gmail.com?subject=' + encodeURIComponent(subject) +
+      '&body=' + encodeURIComponent(body);
+    document.getElementById('form-status').style.display = 'block';
+  });
+</script>
+
+</body>
+</html>
