@@ -6,6 +6,19 @@
 #
 # Installing this also installs the core app (via -r below). torch CPU wheels
 # are served from the PyTorch index rather than PyPI:
+#
+# --- Windows troubleshooting: torch DLL init failure (WinError 1114) ---
+# If importing torch fails with:
+#   OSError: [WinError 1114] A dynamic link library (DLL) initialization
+#   routine failed. Error loading "...\torch\lib\c10.dll" or one of its
+#   dependencies.
+# ...the wheel is fine — Windows is missing the current Microsoft Visual C++
+# Redistributable that recent torch builds are compiled against. Reinstalling
+# torch will NOT fix it. Install the latest "Visual C++ 2015-2022 x64"
+# redistributable, then re-run the import:
+#   https://aka.ms/vs/17/release/vc_redist.x64.exe   (run it, then reboot if needed)
+# Check what you have (need >= 14.40): the version of
+#   C:\Windows\System32\msvcp140.dll   (Properties -> Details -> Product version)
 --extra-index-url https://download.pytorch.org/whl/cpu
 
 -r requirements.txt
