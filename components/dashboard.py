@@ -157,14 +157,14 @@ def render_dashboard_page():
 
     with hdr_actions:
         st.markdown("<div style='margin-top: 22px;'></div>", unsafe_allow_html=True)
-        with st.popover("⋮ More Actions", use_container_width=True):
+        with st.popover("⋮ More Actions", width="stretch"):
             st.markdown("**Data Export**")
             st.caption(
                 "Org unit codes below are derived from breeding_site_type as a "
                 "placeholder — map these to real DHIS2 facility codes before use."
             )
             st.markdown("---")
-            if st.button("Generate DHIS2 Payload", type="primary", use_container_width=True):
+            if st.button("Generate DHIS2 Payload", type="primary", width="stretch"):
                 st.session_state["dhis2_payload"] = _build_dhis2_payload(df)
 
             # Held in session_state rather than drawn inside the button block: clicking the
@@ -176,7 +176,7 @@ def render_dashboard_page():
                 st.download_button(
                     "Download payload JSON", data=payload,
                     file_name=f"dhis2_payload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json", use_container_width=True,
+                    mime="application/json", width="stretch",
                 )
             st.markdown("---")
             if not df.empty:
@@ -184,7 +184,7 @@ def render_dashboard_page():
                     "Download raw specimen records (CSV)",
                     data=df.to_csv(index=False),
                     file_name=f"specimen_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv", use_container_width=True,
+                    mime="text/csv", width="stretch",
                 )
 
     st.markdown("---")
@@ -314,7 +314,7 @@ def render_dashboard_page():
                 st.image(
                     row["photo_urls"][0],
                     caption=f"{row.get('breeding_site_type', 'Site')} ({row.get('collection_date', 'n/a')})",
-                    use_container_width=True,
+                    width="stretch",
                 )
         st.markdown("---")
 
@@ -327,7 +327,7 @@ def render_dashboard_page():
         ledger = add_collector_column(df.drop(columns=["genus"], errors="ignore"))
         ledger = ledger.drop(columns=["collector_id"], errors="ignore")
         ordered = ["Collector"] + [c for c in ledger.columns if c != "Collector"]
-        st.dataframe(ledger[ordered], use_container_width=True)
+        st.dataframe(ledger[ordered], width="stretch")
 
     # ── Footer / subscribe (real persistence, no fake success) ───────────
     st.markdown("<br><hr style='border-top:1px solid #e2e8f0; opacity:0.5;'>", unsafe_allow_html=True)
@@ -351,7 +351,7 @@ def render_dashboard_page():
             sub_email = st.text_input(
                 "Email", placeholder="user@domain.edu.ng", label_visibility="collapsed", key="dash_sub_email"
             )
-            if st.button("Enroll", use_container_width=True, key="dash_sub_btn"):
+            if st.button("Enroll", width="stretch", key="dash_sub_btn"):
                 if not sub_email or "@" not in sub_email:
                     st.error("Please enter a valid email address.")
                 elif _save_subscriber(sub_email):

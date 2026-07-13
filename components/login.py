@@ -72,7 +72,7 @@ def render_login_page():
 
         for img_item in images_to_load:
             if os.path.exists(img_item["file"]):
-                st.image(img_item["file"], caption=img_item["caption"], use_container_width=True)
+                st.image(img_item["file"], caption=img_item["caption"], width="stretch")
             else:
                 with st.container(border=True):
                     st.caption(f"🔬 {img_item['caption']} Asset State: Offline")
@@ -91,7 +91,7 @@ def render_login_page():
 
                 with st.form("forgot_password_form", clear_on_submit=False):
                     reset_email = st.text_input("Registered Investigator Email", placeholder="researcher@example.com").strip()
-                    submit_reset = st.form_submit_button("Generate Reset Vector Link", type="primary", use_container_width=True)
+                    submit_reset = st.form_submit_button("Generate Reset Vector Link", type="primary", width="stretch")
 
                     if submit_reset:
                         if not reset_email:
@@ -107,7 +107,7 @@ def render_login_page():
                             except Exception as reset_fault:
                                 st.error(f"Recovery node exception: {str(reset_fault)}")
 
-                if st.button("⬅ Return to Sign In console", use_container_width=True):
+                if st.button("⬅ Return to Sign In console", width="stretch"):
                     st.session_state["auth_view"] = "login"
                     st.rerun()
 
@@ -132,7 +132,7 @@ def render_login_page():
                     st.markdown('</div>', unsafe_allow_html=True)
                     # ─────────────────────────────────────────────────────────
 
-                    submit = st.form_submit_button("Sign In", use_container_width=True)
+                    submit = st.form_submit_button("Sign In", width="stretch")
 
                     if submit:
                         # Validate Honeypot Status
@@ -165,7 +165,7 @@ def render_login_page():
                                 st.error(f"Operational system fault encountered: {str(network_error)}")
 
                 st.markdown("<br>", unsafe_allow_html=True)
-                if st.button(" Forgot credentials? Recover passkey sequence", key="link_forgot_pass", use_container_width=True):
+                if st.button(" Forgot credentials? Recover passkey sequence", key="link_forgot_pass", width="stretch"):
                     st.session_state["auth_view"] = "forgot_password"
                     st.rerun()
 
@@ -186,7 +186,7 @@ def render_login_page():
                     st.markdown('</div>', unsafe_allow_html=True)
                     # ─────────────────────────────────────────────────────────
 
-                    submit_register = st.form_submit_button("Register", use_container_width=True)
+                    submit_register = st.form_submit_button("Register", width="stretch")
 
                     if submit_register:
                         if reg_honeypot:

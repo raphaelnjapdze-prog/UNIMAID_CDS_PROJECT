@@ -95,7 +95,7 @@ def render_sidebar_nav(active: str):
                 label,
                 key=f"nav_{key}",
                 icon=icon_name,
-                use_container_width=True,
+                width="stretch",
                 type="primary" if is_active else "secondary",
             )
             if clicked and not is_active:

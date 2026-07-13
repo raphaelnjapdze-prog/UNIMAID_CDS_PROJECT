@@ -46,7 +46,7 @@ def render_correlation_page():
                         "week": "Week", "total_density": "Total Specimens Logged",
                         "confirmed_cases": "Confirmed Cases",
                     }),
-                    use_container_width=True, hide_index=True,
+                    width="stretch", hide_index=True,
                 )
         return
 
@@ -105,14 +105,14 @@ def render_correlation_page():
         timeline_df = matrix.set_index("week")[["total_density", "confirmed_cases"]].rename(columns={
             "total_density": "Specimens Logged", "confirmed_cases": "Confirmed Cases",
         })
-        st.line_chart(timeline_df, use_container_width=True)
+        st.line_chart(timeline_df, width="stretch")
 
     with tab2:
         st.subheader(f"Shifted Density (+{weeks_lag}w) vs. Confirmed Cases")
         scatter_df = analysis_set.rename(columns={
             "shifted_density": "Shifted Specimen Density", "confirmed_cases": "Confirmed Cases",
         })
-        st.scatter_chart(scatter_df, x="Shifted Specimen Density", y="Confirmed Cases", use_container_width=True)
+        st.scatter_chart(scatter_df, x="Shifted Specimen Density", y="Confirmed Cases", width="stretch")
 
         x_range = np.linspace(scatter_df["Shifted Specimen Density"].min(), scatter_df["Shifted Specimen Density"].max(), 20)
         st.caption(
@@ -153,5 +153,5 @@ def render_correlation_page():
                 "shifted_density": f"Shifted Density (+{weeks_lag}w)",
                 "confirmed_cases": "Confirmed Cases",
             }),
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )

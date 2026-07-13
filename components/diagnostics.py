@@ -368,7 +368,7 @@ def _render_anopheles_deep_key(target: str | None = None):
                 )
                 if pick != _NOT_OBSERVED:
                     observed[ch["id"]] = label_to_id[pick]
-            run_id = st.button("Identify Anopheles", type="primary", use_container_width=True, key="anoph_identify")
+            run_id = st.button("Identify Anopheles", type="primary", width="stretch", key="anoph_identify")
         with col2:
             st.markdown("##### Result")
             # Compute on click but hold the result in session_state, so the Save button
@@ -414,7 +414,7 @@ def _render_anopheles_deep_key(target: str | None = None):
     with col1:
         st.markdown("##### Dichotomous couplet key — adult female *Anopheles*")
     with col2:
-        if st.button("↺ Restart key", use_container_width=True, key="anoph_key_reset"):
+        if st.button("↺ Restart key", width="stretch", key="anoph_key_reset"):
             st.session_state["anoph_key_node"] = ANOPHELES_KEY_ROOT
             st.session_state["anoph_key_terminal"] = None
             st.session_state["anoph_key_trail"] = []
@@ -454,7 +454,7 @@ def _render_anopheles_deep_key(target: str | None = None):
     )
 
     for i, lead in enumerate(node["leads"]):
-        if st.button(lead["text"], key=f"anoph_lead_{node_id}_{i}", use_container_width=True):
+        if st.button(lead["text"], key=f"anoph_lead_{node_id}_{i}", width="stretch"):
             step = anopheles_key_step(node_id, i)
             st.session_state["anoph_key_trail"] = trail + [f"{node_id}{chr(97 + i)}"]
             if step["type"] == "couplet":
@@ -699,7 +699,7 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                     key="species_markers",
                 )
 
-                run = st.button("Resolve", type="primary", use_container_width=True)
+                run = st.button("Resolve", type="primary", width="stretch")
 
             with col2:
                 st.markdown("#### Results")
@@ -757,7 +757,7 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                     "Adult image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="adult_img_uploader"
                 )
                 if uploaded_adult:
-                    st.image(uploaded_adult, caption="Uploaded specimen", use_container_width=True)
+                    st.image(uploaded_adult, caption="Uploaded specimen", width="stretch")
 
             with col2:
                 st.markdown("#### AI Screening Result")
@@ -818,7 +818,7 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                 )
 
                 run_larval = st.button(
-                    "Resolve Genus", type="primary", use_container_width=True, key="larval_resolve"
+                    "Resolve Genus", type="primary", width="stretch", key="larval_resolve"
                 )
 
             with col2:
@@ -864,7 +864,7 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                     "Larval image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="larval_img_uploader"
                 )
                 if uploaded_larva:
-                    st.image(uploaded_larva, caption="Uploaded specimen", use_container_width=True)
+                    st.image(uploaded_larva, caption="Uploaded specimen", width="stretch")
 
             with col2:
                 st.markdown("#### AI Screening Result")

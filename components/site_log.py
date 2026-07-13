@@ -104,7 +104,7 @@ def render_site_log_page():
             help="Uploaded to the specimen-photos storage bucket and linked to this entry.",
         )
 
-        submitted = st.form_submit_button("Save Site Log Entry", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save Site Log Entry", type="primary", width="stretch")
 
         if submitted:
             st.session_state.pop("site_log_saved", None)
@@ -286,7 +286,7 @@ def _render_subsampling():
                     "pcr_status": "PCR Status",
                     "pcr_confirmed_species": "PCR Species",
                 }),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -330,6 +330,6 @@ def _render_recent_entries():
             "collector": "Collector",
             "pcr_status": "PCR Status",
         }),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )

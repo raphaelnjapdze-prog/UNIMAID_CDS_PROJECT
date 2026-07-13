@@ -59,7 +59,7 @@ def render_bioassay_entry_page():
         )
         notes = st.text_area("Notes", placeholder="Any anomalies, weather, colony source, etc.")
 
-        submitted = st.form_submit_button("Save Bioassay Result", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save Bioassay Result", type="primary", width="stretch")
 
         if submitted:
             if mortality_24hr > mosquitoes_exposed:
@@ -112,4 +112,4 @@ def _render_recent_results():
         "is_control", "mosquitoes_exposed", "mortality_24hr", "batch_reference",
     ]
     display_cols = [c for c in display_cols if c in df.columns]
-    st.dataframe(df[display_cols].head(15), use_container_width=True, hide_index=True)
+    st.dataframe(df[display_cols].head(15), width="stretch", hide_index=True)

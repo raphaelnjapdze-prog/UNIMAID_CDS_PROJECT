@@ -296,7 +296,7 @@ def render_profile_page():
         st.markdown("**Profile Photo**")
         new_avatar = st.file_uploader("Upload a new photo", type=["png", "jpg", "jpeg"])
 
-        if st.button("Save Changes", type="primary", use_container_width=True):
+        if st.button("Save Changes", type="primary", width="stretch"):
             updated = {
                 "full_name": new_name, "headline": new_headline, "educational_level": new_edu,
                 "school_attended": new_school, "country": new_country, "state_province": new_state,
@@ -332,7 +332,7 @@ def render_profile_page():
             "For security, password changes are done via a reset link sent to your "
             "registered email rather than typed directly into this form."
         )
-        if st.button("Send Password Reset Email", use_container_width=True):
+        if st.button("Send Password Reset Email", width="stretch"):
             if not auth_ok:
                 st.error("Authentication utilities are unavailable.")
             else:
@@ -362,7 +362,7 @@ def render_profile_page():
         with st.container(border=True):
             st.markdown("**Two-factor authentication**")
             st.caption("Not yet available in this deployment.")
-            st.button("Set Up Two-Factor Authentication", disabled=True, use_container_width=True)
+            st.button("Set Up Two-Factor Authentication", disabled=True, width="stretch")
 
         st.markdown("---")
         st.subheader("Database Schema")
@@ -370,7 +370,7 @@ def render_profile_page():
             try:
                 from utils.data_manager import attempt_create_supabase_table, current_supabase_table_status
                 st.code(current_supabase_table_status(), language="text")
-                if st.button("Provision Remote Tables", use_container_width=True):
+                if st.button("Provision Remote Tables", width="stretch"):
                     with st.spinner("Running migration..."):
                         success = attempt_create_supabase_table()
                     if success:
@@ -403,7 +403,7 @@ def render_profile_page():
                 data=csv_buffer,
                 file_name=f"submissions_{p_data['full_name'].lower().replace(' ', '_')}.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
         else:
             st.info("No submissions on file for this account yet.")
@@ -432,7 +432,7 @@ def render_profile_page():
         )
 
         st.markdown("---")
-        if st.button("Sign Out", type="secondary", use_container_width=True):
+        if st.button("Sign Out", type="secondary", width="stretch"):
             if auth_ok:
                 sign_out_user()
             st.toast("Signed out.", icon="👋")
@@ -466,5 +466,5 @@ def render_profile_page():
                 data=generate_field_data_standards_doc(p_data),
                 file_name="Field_Data_Entry_Standards.md",
                 mime="text/markdown",
-                use_container_width=True,
+                width="stretch",
             )

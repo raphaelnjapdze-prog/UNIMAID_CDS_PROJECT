@@ -47,7 +47,7 @@ def render_clinical_case_entry_page():
 
         notes = st.text_area("Notes", placeholder="Data source, reporting gaps, anomalies, etc.")
 
-        submitted = st.form_submit_button("Save Case Record", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save Case Record", type="primary", width="stretch")
 
         if submitted:
             if not facility_name.strip():
@@ -85,4 +85,4 @@ def _render_recent_records():
         "report_date", "facility_name", "lga_district",
         "confirmed_cases", "suspected_cases", "diagnostic_method",
     ] if c in df.columns]
-    st.dataframe(df[display_cols].head(15), use_container_width=True, hide_index=True)
+    st.dataframe(df[display_cols].head(15), width="stretch", hide_index=True)

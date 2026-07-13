@@ -95,7 +95,7 @@ def render_specimen_qr(
         file_name=f"specimen_{specimen_id}.png",
         mime="image/png",
         key=key or f"qr_dl_{specimen_id}",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -447,4 +447,4 @@ def render_accuracy_dashboard() -> None:
                 f"{overall['correct']}/{overall['total_confirmed']} correct",
             )
             if data["by_complex"]:
-                st.dataframe(pd.DataFrame(data["by_complex"]), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(data["by_complex"]), width="stretch", hide_index=True)

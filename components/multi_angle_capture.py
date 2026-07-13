@@ -211,7 +211,7 @@ def _render_angle_step(angle: Dict[str, Any]) -> None:
         image_payload = state["images"].get(angle_key)
         if image_payload and image_payload.get("bytes"):
             st.success("Image captured for this angle.")
-            st.image(io.BytesIO(image_payload["bytes"]), use_container_width=True)
+            st.image(io.BytesIO(image_payload["bytes"]), width="stretch")
         if st.button("Remove this image", key=f"clear_{angle_key}"):
             _mark_not_captured(angle_key)
             st.rerun()

@@ -84,7 +84,7 @@ def render_environmental_trends_page():
                 pivot = genus_df.pivot_table(
                     index="breeding_site_type", columns="genus", values="count", aggfunc="sum", fill_value=0
                 )
-                st.dataframe(pivot, use_container_width=True)
+                st.dataframe(pivot, width="stretch")
         else:
             st.info(
                 "No genus data available yet. This populates once specimens are "

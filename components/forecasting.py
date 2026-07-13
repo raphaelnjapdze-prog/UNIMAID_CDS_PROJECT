@@ -33,7 +33,7 @@ def render_forecasting_page():
 
     st.subheader(f"{target_genus} — Weekly Specimen Count")
     weekly_df = trend["weekly_counts"].set_index("week").rename(columns={"count": f"{target_genus} count"})
-    st.line_chart(weekly_df, use_container_width=True)
+    st.line_chart(weekly_df, width="stretch")
 
     st.markdown("---")
     st.subheader("Historical Environmental Conditions")
@@ -52,11 +52,11 @@ def render_forecasting_page():
         c2.metric("Avg Humidity", f"{weather_df['Humidity'].mean():.1f}%")
         c3.metric("Total Rainfall", f"{weather_df['Rainfall'].sum():.1f}mm")
 
-        st.line_chart(weather_df[["Temperature", "Humidity", "Rainfall"]], use_container_width=True)
+        st.line_chart(weather_df[["Temperature", "Humidity", "Rainfall"]], width="stretch")
         st.caption("Source: NASA POWER (power.larc.nasa.gov), historical daily data, resampled to weekly.")
 
     with st.expander("View underlying weekly specimen counts"):
         st.dataframe(
             trend["weekly_counts"].rename(columns={"week": "Week", "count": f"{target_genus} Count"}),
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )

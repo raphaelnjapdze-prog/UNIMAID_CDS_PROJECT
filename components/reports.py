@@ -240,7 +240,7 @@ def render_reports_page():
                     "collection_date", "breeding_site_type", "screening_method", "Collector",
                     "Anopheles", "Culex", "Aedes", "Other", "pcr_status", "pcr_confirmed_species",
                 ] if c in shown.columns]
-                st.dataframe(shown[display_cols].head(20), use_container_width=True)
+                st.dataframe(shown[display_cols].head(20), width="stretch")
                 if len(processed) > 20:
                     st.caption(f"Showing 20 of {len(processed)} — full set included in exports below.")
 
@@ -271,7 +271,7 @@ def render_reports_page():
                             st.write(f"PCR status: {row.get('pcr_status', 'not_submitted')}")
                         with col_img:
                             if row.get("_first_photo"):
-                                st.image(row["_first_photo"], use_container_width=True)
+                                st.image(row["_first_photo"], width="stretch")
                             else:
                                 st.caption("No photo for this entry.")
                             specimen_id = row.get("specimen_id")
@@ -291,7 +291,7 @@ def render_reports_page():
                         "Download Excel (.xlsx)", data=excel_buf,
                         file_name=f"specimen_report_{timestamp_str}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        type="primary", use_container_width=True,
+                        type="primary", width="stretch",
                     )
                 with ex2:
                     csv_export = add_collector_column(processed).drop(
@@ -300,7 +300,7 @@ def render_reports_page():
                     st.download_button(
                         "Download CSV", data=csv_export.to_csv(index=False),
                         file_name=f"specimen_report_{timestamp_str}.csv",
-                        mime="text/csv", use_container_width=True,
+                        mime="text/csv", width="stretch",
                     )
 
     # ── TAB 2: bioassay_results ───────────────────────────────────────────
@@ -329,7 +329,7 @@ def render_reports_page():
                     "total_mortality": "Total Mortality", "replicates": "Replicates",
                     "mortality_pct": "Mortality (%)", "resistance_status": "Status",
                 }),
-                use_container_width=True, hide_index=True,
+                width="stretch", hide_index=True,
             )
             st.caption(
                 "Mortality shown is raw, not Abbott's-corrected. Where control mortality "
@@ -345,5 +345,5 @@ def render_reports_page():
                 "Download Bioassay Report (.xlsx)", data=bio_excel,
                 file_name=f"bioassay_report_{timestamp_str}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary", use_container_width=True,
+                type="primary", width="stretch",
             )
