@@ -18,7 +18,10 @@ def _patch_admin(monkeypatch, password):
 def test_correct_credentials_succeed(monkeypatch):
     _patch_admin(monkeypatch, "secret")
     result = auth.sign_in_user("admin", "secret")
-    assert result is not None
+    # sign_in_user returns a Supabase AuthResponse (attribute access) on the online path
+    # and a plain dict on this local-admin one. components/login.py branches on exactly
+    # that, so pin the shape the fallback is contracted to return.
+    assert isinstance(result, dict)
     assert result["user"]["email"] == "admin@localhost"
 
 

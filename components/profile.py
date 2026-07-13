@@ -15,7 +15,14 @@ import time
 import pandas as pd
 import streamlit as st
 from PIL import Image
+from postgrest.types import CountMethod
 
+from utils.auth import (
+    get_current_user_email,
+    get_current_user_id,
+    get_supabase_client,
+    sign_out_user,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -143,18 +150,17 @@ def initials_avatar(name: str, size: int = 96) -> str:
 def _get_live_stats():
     stats = {"specimens_logged": "—", "confirmed_specimens": "—", "ai_accuracy": "No PCR data yet"}
     try:
-        from utils.auth import get_supabase_client
         client = get_supabase_client()
         if client is None:
             return stats
 
-        resp = client.table("specimen_records").select("specimen_id", count="exact").execute()
+        resp = client.table("specimen_records").select("specimen_id", count=CountMethod.exact).execute()
         if resp.count is not None:
             stats["specimens_logged"] = str(resp.count)
 
         confirmed_resp = (
             client.table("specimen_records")
-            .select("specimen_id", count="exact")
+            .select("specimen_id", count=CountMethod.exact)
             .eq("pcr_status", "confirmed")
             .execute()
         )
@@ -177,13 +183,14 @@ def _get_live_stats():
 
 def _get_user_submissions(current_user_id):
     try:
-        from utils.auth import get_supabase_client
+        from utils.data_manager import response_rows
         client = get_supabase_client()
         if client is None or not current_user_id:
             return None
         resp = client.table("specimen_records").select("*").eq("collector_id", current_user_id).execute()
-        if resp.data:
-            return pd.DataFrame(resp.data)
+        rows = response_rows(resp)
+        if rows:
+            return pd.DataFrame(rows)
     except Exception:
         logger.debug("Could not load user submissions", exc_info=True)
     return None
@@ -191,24 +198,12 @@ def _get_user_submissions(current_user_id):
 
 def render_profile_page():
     p_data = load_profile_meta()
-    profile_json_path, photo_path = _profile_paths()
+    _, photo_path = _profile_paths()
 
-    # ── Auth helpers — imported here, defensively, so a naming mismatch in
-    # your live utils/auth.py shows a warning instead of crashing the app ──
+    # utils.auth is imported at module scope. It is a hard dependency of the whole app
+    # (app.py imports it before any page renders), so a local try/except here could never
+    # actually catch anything — if it failed to import, this page would never be reached.
     auth_ok = True
-    try:
-        from utils.auth import (
-            get_current_user_email,
-            get_current_user_id,
-            get_supabase_client,
-            sign_out_user,
-        )
-    except ImportError as e:
-        auth_ok = False
-        st.error(
-            f"Could not load authentication utilities ({e}). "
-            "Verify the function names in utils/auth.py match what this page imports."
-        )
 
     st.markdown(
         f"""

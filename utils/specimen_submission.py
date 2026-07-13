@@ -6,20 +6,23 @@ without it, PCR-confirmation comparisons can't tell a checklist guess
 from a trained-model prediction.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from utils.auth import get_supabase_client  # adjust import path to match your project
-from utils.data_manager import IDENTIFICATION_METHODS
+from utils.data_manager import IDENTIFICATION_METHODS, first_row
+from utils.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def submit_screening_result(
     screening_method: str,      # "manual_checklist" | "ai_vision" | "trained_classifier"
     result: dict,                # whatever that method's function returned
-    collector_id: str = None,
-    gps_lat: float = None,
-    gps_lon: float = None,
-    breeding_site_type: str = None,
-    photo_urls: list = None,
+    collector_id: str | None = None,
+    gps_lat: float | None = None,
+    gps_lon: float | None = None,
+    breeding_site_type: str | None = None,
+    photo_urls: list | None = None,
 ) -> dict | None:
     """
     Writes one specimen_records row. Returns the inserted row on success,
@@ -35,7 +38,7 @@ def submit_screening_result(
     field_screening_result = {
         "screening_method": screening_method,
         "result": result,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     record = {
@@ -51,7 +54,7 @@ def submit_screening_result(
 
     try:
         response = client.table("specimen_records").insert(record).execute()
-        return response.data[0] if response.data else None
-    except Exception as e:
-        print(f"specimen submission failed: {e}")
+        return first_row(response)
+    except Exception:
+        logger.exception("Specimen submission failed")
         return None

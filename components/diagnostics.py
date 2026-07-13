@@ -628,7 +628,7 @@ def _save_identification(
     st.rerun()
 
 
-def render_diagnostics_page(active_df: pd.DataFrame = None):
+def render_diagnostics_page(active_df: pd.DataFrame | None = None):
     # Survives the rerun that resets the panel after a successful save.
     save_message = st.session_state.pop("diag_save_message", None)
     if save_message:

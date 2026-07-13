@@ -12,34 +12,59 @@ It provides:
 from __future__ import annotations
 
 import io
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 import pandas as pd
 import qrcode
 import streamlit as st
+from qrcode.constants import ERROR_CORRECT_M
 from supabase import Client
 
+from utils.data_manager import first_row, response_rows
 from utils.logging_config import get_logger
 from utils.morphology_keys import complex_membership_by_trigger
 
 try:
     from utils.config import get_base_supabase_client
 except Exception:  # pragma: no cover - fallback for local use
-    def get_base_supabase_client():
+    def get_base_supabase_client() -> Optional[Client]:
         return None
 
 logger = get_logger(__name__)
 
 
+def _as_date(value: Any) -> Optional[date]:
+    """Coerce a stored pcr_confirmed_date into the `date` st.date_input expects.
+
+    Postgres `date` columns come back over PostgREST as ISO strings, but a caller may
+    also hand us a real date/datetime. Anything unparseable yields None (an empty field)
+    rather than crashing the lab form — and says so in the log instead of silently.
+    """
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        logger.warning("Unparseable pcr_confirmed_date %r; leaving the field blank", value)
+        return None
+
+
 def generate_qr_code_image(specimen_id: str, box_size: int = 10, border: int = 4) -> bytes:
     """Generate a QR code PNG for a specimen_id and return raw image bytes."""
-    qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=box_size, border=border)
+    qr = qrcode.QRCode(version=1, error_correction=ERROR_CORRECT_M, box_size=box_size, border=border)
     qr.add_data(str(specimen_id))
     qr.make(fit=True)
     img = qr.make_image(fill_color="black", back_color="white")
 
     buf = io.BytesIO()
-    img.save(buf, format="PNG")
+    # get_image() unwraps qrcode's PilImage to the underlying PIL Image, whose save()
+    # actually declares `format`. Byte-for-byte identical output.
+    img.get_image().save(buf, format="PNG")
     return buf.getvalue()
 
 
@@ -89,9 +114,10 @@ def upsert_specimen_record(client: Client, record: Dict[str, Any]) -> Dict[str, 
     if client is None:
         raise RuntimeError("Supabase client is not available")
     response = client.table("specimen_records").upsert(record, on_conflict="specimen_id").execute()
-    if getattr(response, "data", None):
-        return response.data[0]
-    raise RuntimeError("Failed to upsert specimen record")
+    row = first_row(response)
+    if row is None:
+        raise RuntimeError("Failed to upsert specimen record")
+    return row
 
 
 def fetch_specimen_by_id(client: Client, specimen_id: str) -> Optional[Dict[str, Any]]:
@@ -99,9 +125,7 @@ def fetch_specimen_by_id(client: Client, specimen_id: str) -> Optional[Dict[str,
     if client is None:
         raise RuntimeError("Supabase client is not available")
     response = client.table("specimen_records").select("*").eq("specimen_id", specimen_id).execute()
-    if getattr(response, "data", None):
-        return response.data[0] if response.data else None
-    return None
+    return first_row(response)
 
 
 def render_pcr_confirmation_form() -> None:
@@ -150,7 +174,7 @@ def render_pcr_confirmation_form() -> None:
             )
             pcr_confirmed_date = st.date_input(
                 "PCR confirmed date",
-                value=pd.to_datetime(record.get("pcr_confirmed_date")) if record.get("pcr_confirmed_date") else None,
+                value=_as_date(record.get("pcr_confirmed_date")),
             )
 
             submitted = st.form_submit_button("Submit PCR result")
@@ -310,7 +334,7 @@ def build_accuracy_report(
         raise RuntimeError("Supabase client is not available")
 
     response = client.table("specimen_records").select("*").eq("pcr_status", "confirmed").execute()
-    rows = response.data or []
+    rows = response_rows(response)
 
     if screening_method:
         rows = [

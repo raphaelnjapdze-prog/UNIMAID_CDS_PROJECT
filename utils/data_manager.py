@@ -43,6 +43,27 @@ logger = get_logger(__name__)
 # A method outside this set produces a row no genus aggregator can interpret.
 IDENTIFICATION_METHODS = frozenset({"manual_checklist", "ai_vision", "trained_classifier"})
 
+
+def response_rows(response) -> list[dict]:
+    """Narrow a Supabase response's `.data` to the list of row dicts it actually is.
+
+    supabase-py types `.data` as a loose JSON union (it could in principle be a float, a
+    string, a bool…), so indexing or calling .get() on it directly is unsound — every
+    such use is a type error, and a malformed response would blow up at runtime with an
+    obscure AttributeError instead of being handled. Funnel every read through here: a
+    non-list payload, or entries that aren't objects, yield no rows rather than a crash.
+    """
+    data = getattr(response, "data", None)
+    if not isinstance(data, list):
+        return []
+    return [row for row in data if isinstance(row, dict)]
+
+
+def first_row(response) -> dict | None:
+    """The single row a Supabase insert/update returns, or None when it affected none."""
+    rows = response_rows(response)
+    return rows[0] if rows else None
+
 # =============================================================================
 # SPECIMEN PHOTO UPLOAD
 # =============================================================================
@@ -141,7 +162,7 @@ def submit_site_log_entry(
     try:
         response = client.table("specimen_records").insert(record).execute()
         clear_specimen_records_cache()
-        return response.data[0] if response.data else None
+        return first_row(response)
     except Exception as e:
         logger.exception("Could not save site log entry")
         st.error(f"Could not save site log entry: {e}")
@@ -225,7 +246,7 @@ def submit_multi_angle_capture_entry(
     try:
         response = client.table("specimen_records").insert(record).execute()
         clear_specimen_records_cache()
-        return response.data[0] if response.data else None
+        return first_row(response)
     except Exception as e:
         logger.exception("Could not save multi-angle capture")
         st.error(f"Could not save specimen capture: {e}")
@@ -359,11 +380,10 @@ def vial_out_specimens(
         st.error(f"Could not load the batch record: {e}")
         return None
 
-    rows = response.data or []
-    if not rows:
+    batch = first_row(response)
+    if batch is None:
         st.error("Batch record not found.")
         return None
-    batch = rows[0]
 
     field_screening = batch.get("field_screening_result") or {}
     if field_screening.get("screening_method") != "manual_field_log":
@@ -389,7 +409,7 @@ def vial_out_specimens(
         st.error(f"Could not vial out specimens: {e}")
         return None
 
-    inserted = insert_response.data or children
+    inserted = response_rows(insert_response) or children
     try:
         updated_screening = dict(field_screening)
         updated_screening["result"] = _apply_vialed_out(result, genus, count)
@@ -423,7 +443,7 @@ def fetch_batch_children(batch_specimen_id: str) -> pd.DataFrame:
         response = (
             client.table("specimen_records").select("*").eq("parent_specimen_id", batch_specimen_id).execute()
         )
-        return pd.DataFrame(response.data or [])
+        return pd.DataFrame(response_rows(response))
     except Exception:
         logger.warning("Could not fetch subsampled children for batch %s", batch_specimen_id, exc_info=True)
         return pd.DataFrame()
@@ -490,12 +510,12 @@ def attach_identification_to_specimen(
         st.error(f"Could not load that specimen: {e}")
         return None
 
-    rows = existing.data or []
-    if not rows:
+    existing_row = first_row(existing)
+    if existing_row is None:
         st.error("No specimen found with that ID — check the QR value.")
         return None
 
-    prior = rows[0].get("field_screening_result") or {}
+    prior = existing_row.get("field_screening_result") or {}
     if prior.get("screening_method") == "manual_field_log":
         st.error(
             "That ID is a batch field-count log, not an individual specimen. Vial out a "
@@ -536,7 +556,8 @@ def attach_identification_to_specimen(
         return None
 
     clear_specimen_records_cache()
-    if not response.data:
+    updated = first_row(response)
+    if updated is None:
         # The update matched no rows (e.g. an RLS policy denied the write). Returning a
         # bare None here would let the caller show nothing at all, so say so out loud.
         logger.warning("Identification update for %s matched no rows", specimen_id)
@@ -545,7 +566,7 @@ def attach_identification_to_specimen(
             "specimen. Check your permissions and try again."
         )
         return None
-    return response.data[0]
+    return updated
 
 
 # =============================================================================
@@ -563,8 +584,9 @@ def load_specimen_records() -> pd.DataFrame:
         return pd.DataFrame()
     try:
         response = client.table("specimen_records").select("*").execute()
-        if response.data:
-            return pd.DataFrame(response.data)
+        rows = response_rows(response)
+        if rows:
+            return pd.DataFrame(rows)
     except Exception as e:
         st.error(f"Could not load specimen records: {e}")
     return pd.DataFrame()
@@ -807,7 +829,7 @@ def submit_bioassay_result(
 
     try:
         response = client.table("bioassay_results").insert(record).execute()
-        return response.data[0] if response.data else None
+        return first_row(response)
     except Exception as e:
         st.error(f"Could not save bioassay result: {e}")
         return None
@@ -821,8 +843,9 @@ def load_bioassay_results() -> pd.DataFrame:
         return pd.DataFrame()
     try:
         response = client.table("bioassay_results").select("*").execute()
-        if response.data:
-            return pd.DataFrame(response.data)
+        rows = response_rows(response)
+        if rows:
+            return pd.DataFrame(rows)
     except Exception as e:
         st.error(f"Could not load bioassay results: {e}")
     return pd.DataFrame()
@@ -890,7 +913,7 @@ def submit_clinical_case_record(
 
     try:
         response = client.table("clinical_case_data").insert(record).execute()
-        return response.data[0] if response.data else None
+        return first_row(response)
     except Exception as e:
         st.error(f"Could not save clinical case record: {e}")
         return None
@@ -903,8 +926,9 @@ def load_clinical_case_data() -> pd.DataFrame:
         return pd.DataFrame()
     try:
         response = client.table("clinical_case_data").select("*").execute()
-        if response.data:
-            return pd.DataFrame(response.data)
+        rows = response_rows(response)
+        if rows:
+            return pd.DataFrame(rows)
     except Exception as e:
         st.error(f"Could not load clinical case data: {e}")
     return pd.DataFrame()
