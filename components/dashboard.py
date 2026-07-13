@@ -310,10 +310,14 @@ def render_dashboard_page():
 
     # ── Full ledger ────────────────────────────────────────────────────────
     with st.expander("View Complete Specimen Ledger"):
-        # Show who recorded each specimen: collector_id alone is a UUID, which identifies
-        # nobody to a human reader.
+        # Replace raw collector_id with the readable Collector, rather than showing both.
+        # The raw column is a UUID (or the 'unattributed-legacy' sentinel) and identifies
+        # nobody to a human reader; the resolved name is derived from it and says the same
+        # thing in words. Move it to the front, where a reader looks for who did the work.
         ledger = add_collector_column(df.drop(columns=["genus"], errors="ignore"))
-        st.dataframe(ledger, use_container_width=True)
+        ledger = ledger.drop(columns=["collector_id"], errors="ignore")
+        ordered = ["Collector"] + [c for c in ledger.columns if c != "Collector"]
+        st.dataframe(ledger[ordered], use_container_width=True)
 
     # ── Footer / subscribe (real persistence, no fake success) ───────────
     st.markdown("<br><hr style='border-top:1px solid #e2e8f0; opacity:0.5;'>", unsafe_allow_html=True)
