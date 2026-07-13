@@ -21,15 +21,10 @@ import streamlit as st
 from qrcode.constants import ERROR_CORRECT_M
 from supabase import Client
 
-from utils.data_manager import first_row, response_rows
+from utils.auth import get_supabase_client
+from utils.data_manager import clear_specimen_records_cache, first_row, response_rows
 from utils.logging_config import get_logger
 from utils.morphology_keys import complex_membership_by_trigger
-
-try:
-    from utils.config import get_base_supabase_client
-except Exception:  # pragma: no cover - fallback for local use
-    def get_base_supabase_client() -> Optional[Client]:
-        return None
 
 logger = get_logger(__name__)
 
@@ -104,11 +99,6 @@ def render_specimen_qr(
     )
 
 
-def get_supabase_client() -> Optional[Client]:
-    """Return the active Supabase client when configured."""
-    return get_base_supabase_client()
-
-
 def upsert_specimen_record(client: Client, record: Dict[str, Any]) -> Dict[str, Any]:
     """Insert or update a specimen record in Supabase."""
     if client is None:
@@ -117,6 +107,10 @@ def upsert_specimen_record(client: Client, record: Dict[str, Any]) -> Dict[str, 
     row = first_row(response)
     if row is None:
         raise RuntimeError("Failed to upsert specimen record")
+    # The ledger this row belongs to is cached for 60s. Without this, a lab confirms a
+    # species and the dashboard, accuracy report and specimen tables keep showing the
+    # unconfirmed row back to them — looking like the confirmation was lost.
+    clear_specimen_records_cache()
     return row
 
 

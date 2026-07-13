@@ -165,7 +165,13 @@ def render_dashboard_page():
             )
             st.markdown("---")
             if st.button("Generate DHIS2 Payload", type="primary", use_container_width=True):
-                payload = _build_dhis2_payload(df)
+                st.session_state["dhis2_payload"] = _build_dhis2_payload(df)
+
+            # Held in session_state rather than drawn inside the button block: clicking the
+            # download button triggers a rerun on which that block is False, so the payload
+            # and its own download button disappeared before the file could be saved.
+            payload = st.session_state.get("dhis2_payload")
+            if payload:
                 st.code(payload, language="json")
                 st.download_button(
                     "Download payload JSON", data=payload,

@@ -916,10 +916,15 @@ def submit_bioassay_result(
 
     try:
         response = client.table("bioassay_results").insert(record).execute()
-        return first_row(response)
     except Exception as e:
+        logger.exception("Could not save bioassay result")
         st.error(f"Could not save bioassay result: {e}")
         return None
+
+    # load_bioassay_results is cached for 60s: without this the user saves a replicate and
+    # the table below the form keeps showing the set without it, as if the save was lost.
+    clear_bioassay_results_cache()
+    return first_row(response)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -1004,10 +1009,13 @@ def submit_clinical_case_record(
 
     try:
         response = client.table("clinical_case_data").insert(record).execute()
-        return first_row(response)
     except Exception as e:
+        logger.exception("Could not save clinical case record")
         st.error(f"Could not save clinical case record: {e}")
         return None
+
+    clear_clinical_case_data_cache()
+    return first_row(response)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
