@@ -6,6 +6,7 @@ import streamlit as st
 
 from utils.auth import restore_session
 from utils.navigation import render_sidebar_nav
+from utils.session_cookie import sync_refresh_cookie
 from utils.theme import inject_global_theme
 
 # 1. Page Configuration
@@ -62,6 +63,12 @@ if "authenticated" not in st.session_state:
 # utils.auth.restore_session for the security rationale.
 if not st.session_state["authenticated"]:
     restore_session()
+
+# Keep the refresh-token cookie in step with the session: written on login (so a browser
+# reload can restore the session instead of dumping the user at the login screen) and
+# cleared on sign-out. Runs before the auth gate below, so the sign-out case — which
+# returns early — still clears the cookie.
+sync_refresh_cookie(st.session_state.get("sb_refresh_token"))
 
 # Reverse mapping configuration linking URL keys directly to functional names
 NAV_MAP = {

@@ -13,6 +13,7 @@ from utils.config import (
     get_service_supabase_client,
 )
 from utils.logging_config import get_logger
+from utils.session_cookie import read_refresh_token
 
 logger = get_logger(__name__)
 
@@ -139,23 +140,43 @@ def _clear_auth_state():
     st.session_state["sb_refresh_token"] = None
 
 
+def _adopt_session(auth_response, fallback_access: str = "", fallback_refresh: str = "") -> bool:
+    """Take a validated Supabase auth response and mark the user signed in.
+
+    Returns False (and resets to a clean logged-out state) if Supabase did not hand back
+    a user — a refresh token that no longer maps to one buys nothing.
+    """
+    user = getattr(auth_response, "user", None)
+    if user is None:
+        _clear_auth_state()
+        return False
+
+    # Persist any rotated tokens so the next validation uses the latest pair.
+    session = getattr(auth_response, "session", None)
+    if session is not None:
+        st.session_state["sb_access_token"] = getattr(session, "access_token", fallback_access)
+        st.session_state["sb_refresh_token"] = getattr(session, "refresh_token", fallback_refresh)
+
+    set_authenticated(user, provider="supabase")
+    return True
+
+
 def restore_session() -> bool:
     """
-    Re-establishes an authenticated session from tokens previously persisted
-    in st.session_state — but ONLY after verifying them against Supabase.
+    Re-establishes an authenticated session — but ONLY after verifying the stored tokens
+    against Supabase.
 
-    This replaces the old `?session=active` URL flag, which set
-    authenticated=True with no credential check at all, letting anyone in by
-    editing the address bar. Here, access is granted only if Supabase
-    confirms the refresh token still maps to a valid user: an expired access
-    token is transparently refreshed, and a revoked/invalid token forces a
-    clean logged-out state.
+    Two sources, in order:
 
-    Note: st.session_state does not survive a full browser reload, so the
-    tokens it holds are per-session. This restores auth across Streamlit
-    reruns within a session; it does not (by design) grant access from a URL
-    alone. Cross-reload persistence would require storing the refresh token
-    in a cookie/localStorage, which is a separate, opt-in change.
+    1. st.session_state, which survives Streamlit reruns within a page session.
+    2. The refresh-token cookie, which survives a full browser reload — session_state does
+       not, so without this a refresh dumps the user back to the login screen.
+
+    Neither is trusted on its own. The cookie holds a refresh token and nothing else, and
+    it grants no access by itself: it is handed to Supabase, which validates it
+    server-side and issues a fresh session. A revoked or expired token gets the caller
+    nowhere, and the cookie is dropped. This is emphatically not the old `?session=active`
+    URL flag, which set authenticated=True with no credential check at all.
 
     Returns True if a valid session was restored.
     """
@@ -165,29 +186,31 @@ def restore_session() -> bool:
 
     access_token = st.session_state.get("sb_access_token")
     refresh_token = st.session_state.get("sb_refresh_token")
-    if not access_token or not refresh_token:
+
+    if access_token and refresh_token:
+        try:
+            auth_response = client.auth.set_session(access_token, refresh_token)
+        except Exception:
+            # Refresh token invalid, expired, or revoked — deny and reset.
+            logger.debug("Stored session tokens rejected by Supabase", exc_info=True)
+            _clear_auth_state()
+            return False
+        return _adopt_session(auth_response, access_token, refresh_token)
+
+    # No tokens in session_state: this is what a browser reload looks like. Fall back to
+    # the cookie and let Supabase decide whether it is still good.
+    cookie_token = read_refresh_token()
+    if not cookie_token:
         return False
 
     try:
-        auth_response = client.auth.set_session(access_token, refresh_token)
+        auth_response = client.auth.refresh_session(cookie_token)
     except Exception:
-        # Refresh token invalid, expired, or revoked — deny and reset.
-        _clear_auth_state()
+        logger.debug("Refresh token from cookie rejected by Supabase", exc_info=True)
+        _clear_auth_state()  # also drops the cookie, via sync_refresh_cookie next run
         return False
 
-    user = getattr(auth_response, "user", None)
-    if user is None:
-        _clear_auth_state()
-        return False
-
-    # Persist any rotated tokens so the next validation uses the latest pair.
-    session = getattr(auth_response, "session", None)
-    if session is not None:
-        st.session_state["sb_access_token"] = getattr(session, "access_token", access_token)
-        st.session_state["sb_refresh_token"] = getattr(session, "refresh_token", refresh_token)
-
-    set_authenticated(user, provider="supabase")
-    return True
+    return _adopt_session(auth_response, "", cookie_token)
 
 
 def sign_out_user():

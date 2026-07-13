@@ -7,9 +7,7 @@ reflect something real, or be honestly labeled as unavailable. No fabricated
 numbers, no fake "it worked" toasts for features that aren't wired up yet.
 """
 
-import base64
-import json
-import os
+import io
 import time
 
 import pandas as pd
@@ -24,6 +22,7 @@ from utils.auth import (
     sign_out_user,
 )
 from utils.logging_config import get_logger
+from utils.profile_store import load_profile, save_profile, upload_avatar
 
 logger = get_logger(__name__)
 
@@ -37,23 +36,16 @@ COLORS = {
 }
 
 
-# ── User-scoped storage paths ────────────────────────────────────────────────
-# Each investigator's profile/avatar must live in its own file — a single
-# shared path would let every user overwrite each other's data.
-def _profile_paths():
-    try:
-        from utils.auth import get_current_user_email, get_current_user_id
-        uid = get_current_user_id() or get_current_user_email() or "guest"
-    except Exception:
-        uid = "guest"
-    safe_id = "".join(c if c.isalnum() else "_" for c in str(uid))
-    base = f"data/profiles/{safe_id}"
-    return f"{base}_profile.json", f"{base}_avatar.png"
-
-
+# ── Profile storage ──────────────────────────────────────────────────────────
+# Profiles live in Supabase (utils/profile_store.py), not on the app's disk. Streamlit
+# Cloud's filesystem is ephemeral: the previous data/profiles/<uid>_profile.json scheme
+# lost every profile and avatar on each reboot and redeploy.
 def load_profile_meta():
-    profile_json_path, _ = _profile_paths()
+    """The signed-in user's profile, merged over sensible defaults.
 
+    Returns (profile_dict, avatar_url). A user with nothing saved yet gets the defaults,
+    seeded from their auth record — that is a starting point, not fabricated data.
+    """
     try:
         from utils.auth import get_current_user_email, get_display_name
         auth_name = get_display_name()
@@ -77,21 +69,15 @@ def load_profile_meta():
         "skills": ["Vector Taxonomy", "Larval Sampling", "Insecticide Resistance Bioassays"],
     }
 
-    if os.path.exists(profile_json_path) and os.path.getsize(profile_json_path) > 0:
-        try:
-            with open(profile_json_path, "r") as f:
-                saved_data = json.load(f)
-                return {**default_profile, **saved_data}
-        except Exception:
-            return default_profile
-    return default_profile
+    row = load_profile(get_current_user_id())
+    if not row:
+        return default_profile, None
 
-
-def save_profile_meta(data):
-    profile_json_path, _ = _profile_paths()
-    os.makedirs(os.path.dirname(profile_json_path), exist_ok=True)
-    with open(profile_json_path, "w") as f:
-        json.dump(data, f, indent=4)
+    saved = row.get("profile") or {}
+    if not isinstance(saved, dict):
+        logger.warning("Stored profile for the current user is not an object; using defaults")
+        saved = {}
+    return {**default_profile, **saved}, row.get("avatar_url")
 
 
 def generate_field_data_standards_doc(p_data):
@@ -197,8 +183,7 @@ def _get_user_submissions(current_user_id):
 
 
 def render_profile_page():
-    p_data = load_profile_meta()
-    _, photo_path = _profile_paths()
+    p_data, avatar_url = load_profile_meta()
 
     # utils.auth is imported at module scope. It is a hard dependency of the whole app
     # (app.py imports it before any page renders), so a local try/except here could never
@@ -240,16 +225,13 @@ def render_profile_page():
     )
 
     # ── Profile card ──────────────────────────────────────────────────────
-    avatar_html = ""
-    if os.path.exists(photo_path) and os.path.getsize(photo_path) > 0:
-        try:
-            with open(photo_path, "rb") as f:
-                encoded = base64.b64encode(f.read()).decode()
-            avatar_html = f'<img src="data:image/png;base64,{encoded}" class="avatar-image">'
-        except Exception:
-            logger.debug("Avatar image could not be rendered; using placeholder", exc_info=True)
-    if not avatar_html:
-        avatar_html = initials_avatar(p_data["full_name"])
+    # The avatar is served from the profile-avatars bucket (public-read), so the stored
+    # URL renders directly. Users with no photo get their initials, not a broken image.
+    avatar_html = (
+        f'<img src="{avatar_url}" class="avatar-image">'
+        if avatar_url
+        else initials_avatar(p_data["full_name"])
+    )
 
     badges_html = "".join(f'<span class="spec-badge">{s}</span>' for s in p_data["skills"])
 
@@ -322,17 +304,26 @@ def render_profile_page():
                 "linkedin_url": new_linkedin, "bio": new_bio, "biography": new_biography,
                 "skills": [s.strip() for s in new_skills.split(",") if s.strip()],
             }
+
+            # Normalise to PNG so the stored object matches the content-type we upload it
+            # with, whatever the user picked off their phone.
+            new_avatar_url = None
             if new_avatar is not None:
                 try:
-                    img = Image.open(new_avatar)
-                    os.makedirs(os.path.dirname(photo_path), exist_ok=True)
-                    img.save(photo_path)
+                    buffer = io.BytesIO()
+                    Image.open(new_avatar).convert("RGB").save(buffer, format="PNG")
+                    new_avatar_url = upload_avatar(
+                        get_current_user_id(), buffer.getvalue(), ext="png"
+                    )
                 except Exception as e:
+                    logger.warning("Could not process the uploaded avatar", exc_info=True)
                     st.error(f"Could not process image: {e}")
-            save_profile_meta(updated)
-            st.toast("Profile saved.", icon="✅")
-            time.sleep(0.4)
-            st.rerun()
+
+            # save_profile reports its own failure. Never toast a save that didn't happen.
+            if save_profile(get_current_user_id(), updated, new_avatar_url):
+                st.toast("Profile saved.", icon="✅")
+                time.sleep(0.4)
+                st.rerun()
 
     # --- TAB 2: SECURITY ---
     with tab_security:
