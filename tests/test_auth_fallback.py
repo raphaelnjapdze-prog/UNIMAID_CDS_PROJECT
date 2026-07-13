@@ -40,3 +40,20 @@ def test_fallback_disabled_when_no_password(monkeypatch):
     # With no admin password configured, no credential may unlock the fallback.
     assert auth.sign_in_user("admin", "") is None
     assert auth.sign_in_user("admin", "anything") is None
+
+
+def test_unset_admin_identity_matches_nothing(monkeypatch):
+    """An admin identity that was never configured must not be matchable.
+
+    ADMIN_USERNAME/ADMIN_EMAIL come from secrets and may be unset. Coercing an unset one
+    to "" would let a submitted empty email match it, handing out an admin session to a
+    blank username.
+    """
+    monkeypatch.setattr(auth, "ADMIN_USERNAME", None)
+    monkeypatch.setattr(auth, "ADMIN_EMAIL", None)
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "secret")
+    monkeypatch.setattr(auth, "get_base_supabase_client", lambda: None)
+
+    assert auth.sign_in_user("", "secret") is None
+    assert auth.sign_in_user("   ", "secret") is None
+    assert auth.sign_in_user("admin", "secret") is None

@@ -236,22 +236,6 @@ def render_login_page():
                 "If no admin password is set, only Supabase authentication is available."
             )
 
-        # --- EXPLORER SESSION INITIATION PASS ---
-        st.markdown("**Guest Explorer Mode:**")
-        st.info(
-            "Start a secure guest exploration session with simulated operational data. "
-            "This mode is ideal for demonstrations, stakeholder walkthroughs, and pilot previews."
-        )
-        if st.button("Continue as Guest Explorer", key="guest_explorer_button", use_container_width=True):
-            st.session_state["guest_explorer"] = True
-            st.session_state["authenticated"] = False
-            st.session_state["auth_provider"] = "guest"
-            st.session_state["auth_user_email"] = "guest@explorer.local"
-            st.session_state["auth_user_id"] = "guest-explorer"
-            st.session_state["auth_user_name"] = "Guest Explorer"
-            st.session_state["current_page"] = "dashboard"
-            st.rerun()
-
         # ─── UNIVERSAL TRUST & COMPLIANCE FOOTER ROW ────────────────────────
         st.markdown("""
             <div class="trust-footer-row">

@@ -88,7 +88,6 @@ def initialize_auth_state():
         "current_page": "dashboard",
         "gemini_chat_history": [],
         "captcha_attempts": 0,
-        "guest_explorer": False,
     }
     for key, value in defaults.items():
         if key not in st.session_state:

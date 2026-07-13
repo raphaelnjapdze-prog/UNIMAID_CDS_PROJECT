@@ -56,7 +56,6 @@ def supabase_user():
 
 def set_authenticated(user, provider="supabase"):
     st.session_state["authenticated"] = True
-    st.session_state["guest_explorer"] = False
     st.session_state["auth_provider"] = provider
     if isinstance(user, dict):
         st.session_state["auth_user_email"] = user.get("email")
@@ -132,7 +131,6 @@ def sign_up_user(email: str, password: str, full_name: str):
 def _clear_auth_state():
     """Resets all auth-related session_state to a clean logged-out state."""
     st.session_state["authenticated"] = False
-    st.session_state["guest_explorer"] = False
     st.session_state["auth_provider"] = "local"
     st.session_state["auth_user_email"] = None
     st.session_state["auth_user_id"] = None

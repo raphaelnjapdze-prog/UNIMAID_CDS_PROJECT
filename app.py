@@ -19,27 +19,16 @@ st.set_page_config(
 # 2. Design System Foundation Injection
 inject_global_theme()
 
-# 3. Dynamic UI Sub-Component Layout Imports (Banners, Sidebars, Footers)
-try:
-    from utils.ui_components import inject_global_dashboard_theme as apply_theme
-except ImportError:
-    try:
-        from utils.ui_components import apply_custom_dashboard_theme as apply_theme
-    except ImportError:
-        def apply_theme(): pass
-
-try:
-    from utils.ui_components import render_institutional_sidebar_header as render_banner
-except ImportError:
-    try:
-        from utils.ui_components import render_dashboard_banner as render_banner
-    except ImportError:
-        def render_banner(): pass
-
-try:
-    from utils.ui_components import render_system_footer
-except ImportError:
-    def render_system_footer(): pass
+# 3. UI Sub-Component Layout Imports (Banners, Sidebars, Footers)
+from utils.ui_components import (
+    inject_global_dashboard_theme as apply_theme,
+)
+from utils.ui_components import (
+    render_institutional_sidebar_header as render_banner,
+)
+from utils.ui_components import (
+    render_system_footer,
+)
 
 # Execute additional structural layout themes
 apply_theme()
@@ -67,13 +56,11 @@ from components.site_log import render_site_log_page
 # 5. Session State Initialization & Verified Session Restore
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
-if "guest_explorer" not in st.session_state:
-    st.session_state["guest_explorer"] = False
 
 # Restore a prior session ONLY by re-validating the stored Supabase tokens
 # against the auth server — never by trusting a URL flag. See
 # utils.auth.restore_session for the security rationale.
-if not st.session_state["authenticated"] and not st.session_state["guest_explorer"]:
+if not st.session_state["authenticated"]:
     restore_session()
 
 # Reverse mapping configuration linking URL keys directly to functional names
@@ -95,8 +82,11 @@ NAV_MAP = {
     "profile":   "Investigator Profile",
 }
 def main():
-    # Enforce strict authentication gate security boundary
-    if not st.session_state["authenticated"] and not st.session_state["guest_explorer"]:
+    # Enforce strict authentication gate security boundary. A real Supabase login (or a
+    # revalidated restore_session) is the only way past this — the old Guest Explorer flag
+    # let an unauthenticated visitor through, which on a public Streamlit Cloud URL meant
+    # anyone with the link was inside the app.
+    if not st.session_state["authenticated"]:
         render_login_page()
         return
 
