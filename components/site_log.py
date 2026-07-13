@@ -107,6 +107,7 @@ def render_site_log_page():
         submitted = st.form_submit_button("Save Site Log Entry", type="primary", use_container_width=True)
 
         if submitted:
+            st.session_state.pop("site_log_saved", None)
             error = _validate(
                 anopheles_count, culex_count, aedes_count, other_genera_count,
                 gps_lat, gps_lon, has_gps,
@@ -129,16 +130,30 @@ def render_site_log_page():
                     )
                 if saved:
                     clear_specimen_records_cache()
-                    st.success(f"Saved. Specimen ID: {saved['specimen_id']}")
-                    st.caption("Print this QR label and attach it to the physical specimen so the lab can link it to PCR results.")
-                    label_col, photo_col = st.columns(2)
-                    with label_col:
-                        render_specimen_qr(saved["specimen_id"], key="qr_sitelog_save")
-                    with photo_col:
-                        if saved.get("photo_urls"):
-                            st.image(saved["photo_urls"][0], caption="Uploaded photo", width=200)
+                    # Hand the saved row out of the form to be rendered below. The QR label
+                    # offers a download, and Streamlit refuses st.download_button inside an
+                    # st.form — drawing it here crashed the page on every successful save.
+                    st.session_state["site_log_saved"] = saved
                 else:
-                    st.error("Entry was not saved — check the database connection and try again.")
+                    # submit_site_log_entry surfaces its own error (not configured, not
+                    # signed in, insert rejected); a generic message here would bury it.
+                    pass
+
+    # Rendered outside the form, and kept in session_state rather than drawn once: clicking
+    # the QR download button triggers a rerun, and a label that vanished on that rerun would
+    # take its own download with it. It clears on the next submit.
+    saved = st.session_state.get("site_log_saved")
+    if saved:
+        st.success(f"Saved. Specimen ID: {saved['specimen_id']}")
+        st.caption("Print this QR label and attach it to the physical specimen so the lab can link it to PCR results.")
+        label_col, photo_col = st.columns(2)
+        with label_col:
+            render_specimen_qr(saved["specimen_id"], key="qr_sitelog_save")
+        with photo_col:
+            if saved.get("photo_urls"):
+                st.image(saved["photo_urls"][0], caption="Uploaded photo", width=200)
+            else:
+                st.caption("No photo was attached to this entry.")
 
     st.markdown("---")
     _render_subsampling()
