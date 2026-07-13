@@ -12,6 +12,12 @@ import pandas as pd
 import streamlit as st
 
 from utils.ai_advisory import generate_ai_intervention_response
+from utils.data_manager import (
+    attach_identification_to_specimen,
+    extract_primary_genus,
+    load_specimen_records,
+    specimens_pending_identification,
+)
 from utils.morphology_keys import (
     ANOPHELES_KEY_ROOT,
     GENUS_TRIAGE_MATRIX,
@@ -24,6 +30,7 @@ from utils.morphology_keys import (
     match_larval_morphology,
     search_species_reference,
 )
+from utils.specimen_submission import submit_screening_result
 from utils.vision_inference import process_adult_image_inference, process_larval_image_inference
 
 _TIER_COLOR = {
@@ -325,7 +332,7 @@ def _render_key_terminal(result: dict):
     st.caption(f"Vector status: {result.get('vector_status','Unknown')}")
 
 
-def _render_anopheles_deep_key():
+def _render_anopheles_deep_key(target: str | None = None):
     """The two-tool Anopheles Deep Key section: character scoring + couplet walker."""
     st.markdown("#### Anopheles Deep Key")
     st.caption(
@@ -372,19 +379,16 @@ def _render_anopheles_deep_key():
 
                     if res.get("resolution_level") not in ("undetermined", "genus"):
                         st.markdown("---")
-                        if st.button("💾 Save this Anopheles result", key="save_anoph_char"):
-                            from utils.specimen_submission import submit_screening_result
-                            saved = submit_screening_result(
-                                screening_method="manual_checklist",
-                                result={
-                                    "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
-                                    "anopheles_deep_key": res,
-                                },
-                            )
-                            if saved:
-                                st.success(f"Saved as specimen {saved['specimen_id']}")
-                            else:
-                                st.error("Could not save — check database connection.")
+                        _save_identification(
+                            "💾 Save this Anopheles result",
+                            "save_anoph_char",
+                            "manual_checklist",
+                            {
+                                "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
+                                "anopheles_deep_key": res,
+                            },
+                            target,
+                        )
             else:
                 st.info("Set characters on the left and click **Identify Anopheles**.")
         return
@@ -413,19 +417,16 @@ def _render_anopheles_deep_key():
     terminal = st.session_state["anoph_key_terminal"]
     if terminal:
         _render_key_terminal(terminal)
-        if st.button("💾 Save this key result", key="save_anoph_key"):
-            from utils.specimen_submission import submit_screening_result
-            saved = submit_screening_result(
-                screening_method="manual_checklist",
-                result={
-                    "genus_triage": {"genus": "Anopheles"},
-                    "anopheles_couplet_key": terminal,
-                },
-            )
-            if saved:
-                st.success(f"Saved as specimen {saved['specimen_id']}")
-            else:
-                st.error("Could not save — check database connection.")
+        _save_identification(
+            "💾 Save this key result",
+            "save_anoph_key",
+            "manual_checklist",
+            {
+                "genus_triage": {"genus": "Anopheles"},
+                "anopheles_couplet_key": terminal,
+            },
+            target,
+        )
         st.info("Click **↺ Restart key** to identify another specimen.")
         return
 
@@ -456,7 +457,144 @@ def _render_anopheles_deep_key():
             st.rerun()
 
 
+_NEW_SPECIMEN = "— New specimen (create a new record) —"
+
+
+def _pending_specimen_options() -> dict:
+    """Map a human label -> specimen_id for every vialed-out individual still awaiting
+    identification. These are the tubes a user physically has in hand."""
+    pending = specimens_pending_identification(load_specimen_records())
+    options = {}
+    for row in pending.to_dict("records"):
+        specimen_id = row.get("specimen_id")
+        if not specimen_id:
+            continue
+        genus = extract_primary_genus(row.get("field_screening_result")) or "?"
+        tube = row.get("tube_label") or str(specimen_id)[:8]
+        options[f"{tube} · {genus} · {str(specimen_id)[:8]}"] = specimen_id
+    return options
+
+
+def _clear_specimen_link() -> None:
+    """Drop the linked specimen. Safe only as a button callback or before the widgets
+    are instantiated — Streamlit rejects writes to a widget's session_state entry once
+    that widget exists on the current run."""
+    st.session_state.pop("diag_specimen_scan", None)
+    st.session_state.pop("diag_specimen_pick", None)
+
+
+def _render_specimen_link() -> str | None:
+    """Let the user attach this identification to an existing vialed-out specimen
+    (scanned by QR / picked by tube label) instead of creating a new record.
+
+    This is what keeps a subsampled specimen counted once: identifying a tube that
+    already has a row must UPDATE that row, not insert a second one. Returns the
+    target specimen_id, or None to create a new record.
+    """
+    # A successful save asks for the link to be dropped, but it can only be honoured
+    # here — before the widgets are instantiated on this run.
+    if st.session_state.pop("diag_clear_link_pending", False):
+        _clear_specimen_link()
+
+    options = _pending_specimen_options()
+    choices = [_NEW_SPECIMEN] + list(options.keys())
+
+    # A specimen stops being "pending" the moment it is identified, so its label leaves
+    # `choices` while session_state still holds it — Streamlit raises on a stored value
+    # that is no longer an option. Drop the stale pick before the widget is built.
+    if st.session_state.get("diag_specimen_pick") not in choices:
+        st.session_state.pop("diag_specimen_pick", None)
+
+    linked = st.session_state.get("diag_linked_specimen")
+    with st.expander(
+        "🔗 Identifying a vialed specimen from a batch? (optional)",
+        expanded=bool(linked),
+    ):
+        st.caption(
+            "Specimens vialed out of a field-count batch already have a record and a QR "
+            "label. Link one here and your result will be saved onto that specimen "
+            "instead of creating a duplicate record. The link stays active until you "
+            "clear it — check it matches the tube in your hand before saving."
+        )
+        scanned = st.text_input(
+            "Scan or paste the specimen QR ID",
+            key="diag_specimen_scan",
+            placeholder="UUID from the tube's QR label",
+        ).strip()
+
+        picked_id = None
+        if options:
+            choice = st.selectbox(
+                "…or pick a tube awaiting identification",
+                choices,
+                key="diag_specimen_pick",
+            )
+            picked_id = options.get(choice)
+        else:
+            st.caption("No vialed specimens are currently awaiting identification.")
+
+        target = scanned or picked_id
+        if target:
+            st.button("✕ Clear link", key="diag_clear_link", on_click=_clear_specimen_link)
+        return target
+
+
+def _render_link_banner(target: str | None) -> None:
+    """Show, on every run and outside the collapsed expander, which specimen the next
+    save will overwrite. Saving onto the wrong tube silently replaces that specimen's
+    identification, so this must not be hidden behind a closed expander."""
+    if target:
+        st.warning(
+            f"🔗 Linked — saving any result below will overwrite the identification on "
+            f"specimen **{str(target)[:8]}…**, not create a new record."
+        )
+
+
+def _save_identification(
+    label: str, key: str, screening_method: str, result: dict, target: str | None
+) -> None:
+    """Render the save button for an identification result and route the write.
+
+    Routes to attach_identification_to_specimen when `target` is a linked vialed-out
+    specimen (so it is updated, not duplicated), otherwise creates a new record. Never
+    reports success it didn't get — a failed write shows an error.
+    """
+    if not st.button(label, key=key):
+        return
+
+    if target:
+        saved = attach_identification_to_specimen(
+            specimen_id=target, screening_method=screening_method, result=result
+        )
+        if saved:
+            # Drop the link so the next identification cannot silently overwrite the
+            # specimen just saved. The rerun is what lets the widgets be cleared legally.
+            st.session_state["diag_saved_specimen"] = str(target)
+            st.session_state["diag_clear_link_pending"] = True
+            st.rerun()
+        # attach_identification_to_specimen surfaces its own error on every failure path.
+        return
+
+    saved = submit_screening_result(screening_method=screening_method, result=result)
+    if saved:
+        st.success(f"Saved as specimen {saved['specimen_id']}")
+    else:
+        st.error("Could not save — check database connection.")
+
+
 def render_diagnostics_page(active_df: pd.DataFrame = None):
+    # Survives the rerun that clears the link after a successful attach.
+    just_saved = st.session_state.pop("diag_saved_specimen", None)
+    if just_saved:
+        st.success(
+            f"Identification saved onto specimen {just_saved[:8]}… — the link has been "
+            f"cleared, so the next result will not overwrite it."
+        )
+
+    target = _render_specimen_link()
+    st.session_state["diag_linked_specimen"] = target
+    _render_link_banner(target)
+
     tab1, tab2, tab3 = st.tabs([
         "Adult Identification",
         "Larval Identification",
@@ -481,7 +619,7 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
         st.markdown("---")
 
         if method == "Anopheles Deep Key":
-            _render_anopheles_deep_key()
+            _render_anopheles_deep_key(target)
 
         elif method == "Manual Character Checklist":
             col1, col2 = st.columns([5, 4])
@@ -537,19 +675,16 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
 
                         # ── Save this checklist result ──────────────────
                         st.markdown("---")
-                        if st.button("💾 Save this checklist result", key="save_checklist"):
-                            from utils.specimen_submission import submit_screening_result
-                            saved = submit_screening_result(
-                                screening_method="manual_checklist",
-                                result={
-                                    "genus_triage": triage,
-                                    "species_candidates": candidates,
-                                },
-                            )
-                            if saved:
-                                st.success(f"Saved as specimen {saved['specimen_id']}")
-                            else:
-                                st.error("Could not save — check database connection.")
+                        _save_identification(
+                            "💾 Save this checklist result",
+                            "save_checklist",
+                            "manual_checklist",
+                            {
+                                "genus_triage": triage,
+                                "species_candidates": candidates,
+                            },
+                            target,
+                        )
                 else:
                     st.info("Set traits on the left and click **Resolve**.")
 
@@ -575,16 +710,13 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
                     # ── Save this AI screening result ──────────────────
                     if "error" not in result:
                         st.markdown("---")
-                        if st.button("💾 Save this AI screening result", key="save_vision_adult"):
-                            from utils.specimen_submission import submit_screening_result
-                            saved = submit_screening_result(
-                                screening_method="ai_vision",
-                                result=result,
-                            )
-                            if saved:
-                                st.success(f"Saved as specimen {saved['specimen_id']}")
-                            else:
-                                st.error("Could not save — check database connection.")
+                        _save_identification(
+                            "💾 Save this AI screening result",
+                            "save_vision_adult",
+                            "ai_vision",
+                            result,
+                            target,
+                        )
                 else:
                     st.info("Upload a photo to run AI-assisted screening.")
 
@@ -648,16 +780,13 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
 
                     # ── Save this checklist result ──────────────────
                     st.markdown("---")
-                    if st.button("💾 Save this larval checklist result", key="save_checklist_larval"):
-                        from utils.specimen_submission import submit_screening_result
-                        saved = submit_screening_result(
-                            screening_method="manual_checklist",
-                            result=result,
-                        )
-                        if saved:
-                            st.success(f"Saved as specimen {saved['specimen_id']}")
-                        else:
-                            st.error("Could not save — check database connection.")
+                    _save_identification(
+                        "💾 Save this larval checklist result",
+                        "save_checklist_larval",
+                        "manual_checklist",
+                        result,
+                        target,
+                    )
                 else:
                     st.info("Set the characters and click **Resolve Genus**.")
 
@@ -681,16 +810,13 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
                     # ── Save this AI screening result ──────────────────
                     if "error" not in result:
                         st.markdown("---")
-                        if st.button("💾 Save this AI screening result", key="save_vision_larval"):
-                            from utils.specimen_submission import submit_screening_result
-                            saved = submit_screening_result(
-                                screening_method="ai_vision",
-                                result=result,
-                            )
-                            if saved:
-                                st.success(f"Saved as specimen {saved['specimen_id']}")
-                            else:
-                                st.error("Could not save — check database connection.")
+                        _save_identification(
+                            "💾 Save this AI screening result",
+                            "save_vision_larval",
+                            "ai_vision",
+                            result,
+                            target,
+                        )
                 else:
                     st.info("Upload a photo to run AI-assisted screening.")
 

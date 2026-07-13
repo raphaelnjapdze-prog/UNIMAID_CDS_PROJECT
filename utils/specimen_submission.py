@@ -9,6 +9,7 @@ from a trained-model prediction.
 from datetime import date, datetime
 
 from utils.auth import get_supabase_client  # adjust import path to match your project
+from utils.data_manager import IDENTIFICATION_METHODS
 
 
 def submit_screening_result(
@@ -24,9 +25,8 @@ def submit_screening_result(
     Writes one specimen_records row. Returns the inserted row on success,
     None on failure (caller should show an error to the user).
     """
-    allowed_methods = {"manual_checklist", "ai_vision", "trained_classifier"}
-    if screening_method not in allowed_methods:
-        raise ValueError(f"screening_method must be one of {allowed_methods}")
+    if screening_method not in IDENTIFICATION_METHODS:
+        raise ValueError(f"screening_method must be one of {IDENTIFICATION_METHODS}")
 
     client = get_supabase_client()
     if client is None:

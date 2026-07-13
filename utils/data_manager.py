@@ -37,6 +37,12 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# The screening methods that represent a single-specimen identification. Both write
+# paths validate against this: submit_screening_result (insert) and
+# attach_identification_to_specimen (update onto an existing vialed-out specimen).
+# A method outside this set produces a row no genus aggregator can interpret.
+IDENTIFICATION_METHODS = frozenset({"manual_checklist", "ai_vision", "trained_classifier"})
+
 # =============================================================================
 # SPECIMEN PHOTO UPLOAD
 # =============================================================================
@@ -227,6 +233,322 @@ def submit_multi_angle_capture_entry(
 
 
 # =============================================================================
+# 3b. SUBSAMPLING — "vial out" individual specimens from a batch field-count log
+# =============================================================================
+# A manual_field_log row is a batch collection event holding raw genus counts
+# (e.g. 500 Anopheles). To PCR-confirm individuals, we subsample: each vialed
+# specimen becomes its own specimen_records row (its specimen_id IS its QR/barcode),
+# linked back to the batch via parent_specimen_id, and independently identifiable
+# and PCR-confirmable. The batch's raw counts are preserved untouched; a "vialed_out"
+# tally records how many of each genus have been individualized, so effective genus
+# totals (raw − vialed_out, plus one per child) never double-count. These pure
+# helpers hold the count math and row shaping so they can be unit-tested without a DB.
+
+# Genus display name -> the manual_field_log count key it is stored under.
+_FIELD_LOG_GENUS_KEYS = {
+    "Anopheles": "anopheles_count",
+    "Culex": "culex_count",
+    "Aedes": "aedes_count",
+}
+
+
+def _available_to_vial(field_log_result: dict, genus: str) -> int:
+    """How many specimens of `genus` in a manual_field_log batch remain available
+    to vial out: the raw field count minus those already vialed out. Floors at 0;
+    returns 0 for genera the field log doesn't track (only Anopheles/Culex/Aedes)."""
+    key = _FIELD_LOG_GENUS_KEYS.get(genus)
+    if key is None:
+        return 0
+    result = field_log_result or {}
+    raw = int(result.get(key, 0) or 0)
+    already = int((result.get("vialed_out") or {}).get(genus, 0) or 0)
+    return max(0, raw - already)
+
+
+def available_to_vial(batch_record: dict, genus: str) -> int:
+    """Public accessor: how many specimens of `genus` remain available to vial out of
+    a batch specimen_records row. Returns 0 if the row isn't a field-count log. Wraps
+    the tested `_available_to_vial` count math so UI code doesn't re-derive it."""
+    field_screening = (batch_record or {}).get("field_screening_result") or {}
+    if field_screening.get("screening_method") != "manual_field_log":
+        return 0
+    return _available_to_vial(field_screening.get("result") or {}, genus)
+
+
+def _apply_vialed_out(field_log_result: dict, genus: str, count: int) -> dict:
+    """Return a copy of a manual_field_log result with `count` more specimens of
+    `genus` recorded under 'vialed_out'. The raw counts are preserved unchanged, so
+    the original catch total is never lost and vialing stays reversible."""
+    updated = dict(field_log_result or {})
+    vialed = dict(updated.get("vialed_out") or {})
+    vialed[genus] = int(vialed.get(genus, 0) or 0) + int(count)
+    updated["vialed_out"] = vialed
+    return updated
+
+
+def _build_subsample_children(
+    batch_row: dict, genus: str, count: int, tube_prefix: str | None, now_iso: str
+) -> list[dict]:
+    """Build (but do not persist) the child specimen_records rows for a vial-out.
+    Pure and side-effect free — the caller performs the DB insert and parent update.
+    Each child inherits the batch's collection metadata, carries a known-genus
+    'field_subsample' screening result (pending species identification), and gets a
+    fresh specimen_id that doubles as its QR/barcode."""
+    children: list[dict] = []
+    for i in range(count):
+        specimen_id = str(uuid.uuid4())
+        children.append({
+            "specimen_id": specimen_id,
+            "parent_specimen_id": batch_row.get("specimen_id"),
+            "specimen_role": "individual",
+            "collection_date": batch_row.get("collection_date"),
+            "collector_id": batch_row.get("collector_id"),
+            "gps_lat": batch_row.get("gps_lat"),
+            "gps_lon": batch_row.get("gps_lon"),
+            "breeding_site_type": batch_row.get("breeding_site_type"),
+            "photo_urls": [],
+            "tube_label": f"{tube_prefix}-{i + 1:03d}" if tube_prefix else None,
+            "field_screening_result": {
+                "screening_method": "field_subsample",
+                "result": {
+                    "genus": genus,
+                    "resolution_level": "genus",
+                    "pending_identification": True,
+                },
+                "timestamp": now_iso,
+            },
+            "pcr_status": "not_submitted",
+        })
+    return children
+
+
+def vial_out_specimens(
+    batch_specimen_id: str, genus: str, count: int, tube_prefix: str | None = None
+) -> list[dict] | None:
+    """Subsample `count` individual specimens of `genus` out of a batch field-count
+    log, creating one barcoded specimen_records row per individual (linked to the
+    batch via parent_specimen_id) so each can be identified and PCR-confirmed on its
+    own. The batch's raw counts are preserved; a 'vialed_out' tally is updated so
+    genus totals never double-count.
+
+    Returns the list of created child rows (each carries a specimen_id for QR
+    printing), or None if Supabase isn't configured, the batch is invalid, or fewer
+    than `count` specimens of `genus` remain available. Never fabricates success:
+    callers must surface an honest error on None.
+    """
+    client = get_supabase_client()
+    if client is None:
+        st.error("Supabase is not configured — specimens cannot be vialed out.")
+        return None
+
+    if count < 1:
+        st.error("Number to vial out must be at least 1.")
+        return None
+
+    genus = (genus or "").strip().capitalize()
+    if genus not in _FIELD_LOG_GENUS_KEYS:
+        st.error(f"Subsampling is only supported for {', '.join(_FIELD_LOG_GENUS_KEYS)}.")
+        return None
+
+    try:
+        response = (
+            client.table("specimen_records").select("*").eq("specimen_id", batch_specimen_id).execute()
+        )
+    except Exception as e:
+        logger.exception("Could not load batch record for vialing")
+        st.error(f"Could not load the batch record: {e}")
+        return None
+
+    rows = response.data or []
+    if not rows:
+        st.error("Batch record not found.")
+        return None
+    batch = rows[0]
+
+    field_screening = batch.get("field_screening_result") or {}
+    if field_screening.get("screening_method") != "manual_field_log":
+        st.error("Specimens can only be vialed out of a field-count log entry.")
+        return None
+    result = field_screening.get("result") or {}
+
+    available = _available_to_vial(result, genus)
+    if count > available:
+        st.error(f"Only {available} {genus} remain available to vial out of this batch.")
+        return None
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    children = _build_subsample_children(batch, genus, count, tube_prefix, now_iso)
+
+    # Insert the individuals first, then update the batch tally. If the tally update
+    # fails we roll the children back, so the batch's vialed_out count and the actual
+    # child rows can never disagree (which would corrupt genus totals).
+    try:
+        insert_response = client.table("specimen_records").insert(children).execute()
+    except Exception as e:
+        logger.exception("Could not create subsampled specimens")
+        st.error(f"Could not vial out specimens: {e}")
+        return None
+
+    inserted = insert_response.data or children
+    try:
+        updated_screening = dict(field_screening)
+        updated_screening["result"] = _apply_vialed_out(result, genus, count)
+        (
+            client.table("specimen_records")
+            .update({"field_screening_result": updated_screening})
+            .eq("specimen_id", batch_specimen_id)
+            .execute()
+        )
+    except Exception as e:
+        logger.exception("Vial-out batch tally update failed; rolling back children")
+        try:
+            child_ids = [c["specimen_id"] for c in inserted]
+            client.table("specimen_records").delete().in_("specimen_id", child_ids).execute()
+        except Exception:
+            logger.error("Rollback of subsampled children failed — manual cleanup needed", exc_info=True)
+        st.error(f"Could not update the batch tally, so vialing was rolled back: {e}")
+        return None
+
+    clear_specimen_records_cache()
+    return inserted
+
+
+def fetch_batch_children(batch_specimen_id: str) -> pd.DataFrame:
+    """Return all individual specimens vialed out of a batch, as a DataFrame
+    (empty — never fabricated — if none exist or Supabase is unavailable)."""
+    client = get_supabase_client()
+    if client is None:
+        return pd.DataFrame()
+    try:
+        response = (
+            client.table("specimen_records").select("*").eq("parent_specimen_id", batch_specimen_id).execute()
+        )
+        return pd.DataFrame(response.data or [])
+    except Exception:
+        logger.warning("Could not fetch subsampled children for batch %s", batch_specimen_id, exc_info=True)
+        return pd.DataFrame()
+
+
+def is_pending_identification(record) -> bool:
+    """True if a row is a vialed-out individual still awaiting its identification —
+    i.e. a subsample whose genus is known from the pile it came from but which has
+    not yet been morphologically or AI-identified. These are the specimens a user
+    scans a tube for on the Diagnostics page."""
+    field_screening = (record or {}).get("field_screening_result") or {}
+    if field_screening.get("screening_method") != "field_subsample":
+        return False
+    return bool((field_screening.get("result") or {}).get("pending_identification"))
+
+
+def specimens_pending_identification(df: pd.DataFrame) -> pd.DataFrame:
+    """Filter a loaded specimen_records frame down to the vialed-out individuals still
+    awaiting identification. Pure — takes the frame from the cached
+    load_specimen_records() rather than issuing its own query."""
+    if df is None or df.empty or "field_screening_result" not in df.columns:
+        return pd.DataFrame()
+    # Test the one column that decides this, rather than materializing a dict of every
+    # column (photos, PCR fields, …) for every row in the ledger on each page render.
+    mask = df["field_screening_result"].apply(
+        lambda fsr: is_pending_identification({"field_screening_result": fsr})
+    )
+    return df[mask].copy()
+
+
+def attach_identification_to_specimen(
+    specimen_id: str, screening_method: str, result: dict
+) -> dict | None:
+    """Attach a morphological/AI identification to an EXISTING specimen row (e.g. a
+    vialed-out individual whose barcode was scanned), replacing its
+    field_screening_result. Use this instead of submit_screening_result when the
+    specimen record already exists. Returns the updated row, or None on failure —
+    the caller must show an honest error, never a fake success."""
+    client = get_supabase_client()
+    if client is None:
+        st.error("Supabase is not configured — this identification cannot be saved.")
+        return None
+
+    # Same allowlist submit_screening_result enforces on the insert path. An unrecognised
+    # method would write a row that neither extract_genus_counts_from_screening nor
+    # extract_primary_genus can read — the specimen would persist but be invisible to
+    # every aggregate that reads the ledger.
+    if screening_method not in IDENTIFICATION_METHODS:
+        raise ValueError(f"screening_method must be one of {IDENTIFICATION_METHODS}")
+
+    # Refuse to overwrite a batch field-count log. Its field_screening_result holds the
+    # raw genus counts and the vialed_out tally; replacing that with a single-specimen
+    # identification would silently destroy the catch totals for the whole collection
+    # event. Individuals must be vialed out of the batch first (see vial_out_specimens).
+    try:
+        existing = (
+            client.table("specimen_records")
+            .select("field_screening_result")
+            .eq("specimen_id", specimen_id)
+            .execute()
+        )
+    except Exception as e:
+        logger.exception("Could not load specimen %s before attaching identification", specimen_id)
+        st.error(f"Could not load that specimen: {e}")
+        return None
+
+    rows = existing.data or []
+    if not rows:
+        st.error("No specimen found with that ID — check the QR value.")
+        return None
+
+    prior = rows[0].get("field_screening_result") or {}
+    if prior.get("screening_method") == "manual_field_log":
+        st.error(
+            "That ID is a batch field-count log, not an individual specimen. Vial out a "
+            "specimen from the batch first, then identify that individual."
+        )
+        return None
+
+    # Carry the subsampled genus forward. The batch this specimen came from has already
+    # been decremented by one for it, so if the incoming identification resolves to no
+    # genus (undetermined triage, vision returning none), the specimen would contribute
+    # nothing and a real, caught mosquito would vanish from the totals. The genus is known
+    # from the pile it was vialed out of; keep it as the floor that aggregation falls back
+    # to. Re-identifying an already-identified child preserves it via the second branch.
+    subsampled_genus = None
+    if prior.get("screening_method") == "field_subsample":
+        subsampled_genus = (prior.get("result") or {}).get("genus")
+    elif prior.get("subsampled_genus"):
+        subsampled_genus = prior["subsampled_genus"]
+
+    field_screening_result = {
+        "screening_method": screening_method,
+        "result": result,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if subsampled_genus:
+        field_screening_result["subsampled_genus"] = subsampled_genus
+
+    try:
+        response = (
+            client.table("specimen_records")
+            .update({"field_screening_result": field_screening_result})
+            .eq("specimen_id", specimen_id)
+            .execute()
+        )
+    except Exception as e:
+        logger.exception("Could not attach identification to specimen %s", specimen_id)
+        st.error(f"Could not save identification: {e}")
+        return None
+
+    clear_specimen_records_cache()
+    if not response.data:
+        # The update matched no rows (e.g. an RLS policy denied the write). Returning a
+        # bare None here would let the caller show nothing at all, so say so out loud.
+        logger.warning("Identification update for %s matched no rows", specimen_id)
+        st.error(
+            "The identification was not saved — the database accepted no change to that "
+            "specimen. Check your permissions and try again."
+        )
+        return None
+    return response.data[0]
+
+
+# =============================================================================
 # 4. LOADING — single source of truth for reading the ledger
 # =============================================================================
 @st.cache_data(ttl=60, show_spinner=False)
@@ -305,9 +627,13 @@ def attempt_create_supabase_table() -> bool:
             pcr_confirmed_species text,
             pcr_lab_reference text,
             pcr_confirmed_date date,
+            parent_specimen_id uuid REFERENCES {SPECIMEN_TABLE} (specimen_id) ON DELETE SET NULL,
+            tube_label text,
+            specimen_role text NOT NULL DEFAULT 'primary',
             created_at timestamptz DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS idx_specimen_pcr_status ON {SPECIMEN_TABLE} (pcr_status);
+        CREATE INDEX IF NOT EXISTS idx_specimen_parent ON {SPECIMEN_TABLE} (parent_specimen_id);
     """
     try:
         service.rpc("sql", {"sql": create_sql}).execute()
@@ -345,10 +671,14 @@ def extract_genus_counts_from_screening(field_screening_result: dict) -> dict:
     result = field_screening_result.get("result") or {}
 
     if method == "manual_field_log":
+        # Subtract any specimens vialed out of this batch: each is now tracked as its
+        # own child row contributing 1, so counting them here too would double-count.
+        # Raw counts are preserved on the row; we only net out vialed_out for totals.
+        vialed = result.get("vialed_out") or {}
         counts = {
-            "Anopheles": int(result.get("anopheles_count", 0) or 0),
-            "Culex": int(result.get("culex_count", 0) or 0),
-            "Aedes": int(result.get("aedes_count", 0) or 0),
+            "Anopheles": int(result.get("anopheles_count", 0) or 0) - int(vialed.get("Anopheles", 0) or 0),
+            "Culex": int(result.get("culex_count", 0) or 0) - int(vialed.get("Culex", 0) or 0),
+            "Aedes": int(result.get("aedes_count", 0) or 0) - int(vialed.get("Aedes", 0) or 0),
         }
         other = int(result.get("other_genera_count", 0) or 0)
         if other:
@@ -356,7 +686,11 @@ def extract_genus_counts_from_screening(field_screening_result: dict) -> dict:
         return {k: v for k, v in counts.items() if v > 0}
 
     genus = None
-    if method == "ai_vision":
+    if method == "field_subsample":
+        # An individual vialed out of a batch: genus is known (subsampled from a
+        # genus-specific pile), species identification may still be pending.
+        genus = result.get("genus")
+    elif method == "ai_vision":
         genus = result.get("genus") or _genus_from_label(result.get("best_match"))
     elif method == "manual_checklist":
         genus_triage = result.get("genus_triage")
@@ -367,6 +701,14 @@ def extract_genus_counts_from_screening(field_screening_result: dict) -> dict:
                 genus = _genus_from_label(candidates[0].get("species_name"))
     elif method == "trained_classifier":
         genus = result.get("genus") or _genus_from_label(result.get("predicted_species"))
+
+    if genus not in ("Anopheles", "Culex", "Aedes"):
+        # A specimen vialed out of a batch whose identification came back undetermined.
+        # Its parent batch was already decremented by one for it, so dropping it here
+        # would delete a real, caught mosquito from the totals. Fall back to the genus of
+        # the pile it was subsampled from — which is known regardless of what the
+        # identification could or couldn't resolve. See attach_identification_to_specimen.
+        genus = field_screening_result.get("subsampled_genus")
 
     if genus in ("Anopheles", "Culex", "Aedes"):
         return {genus: 1}
@@ -407,6 +749,10 @@ def extract_primary_genus(field_screening_result) -> str | None:
             return genus_triage.get("genus")
         return result.get("genus") or result.get("resolved_genus")
     if method == "trained_classifier":
+        return result.get("genus")
+    if method == "field_subsample":
+        # Genus is known from which pile the individual was subsampled, even before
+        # species-level morphology/PCR — so it counts at genus level for aggregation.
         return result.get("genus")
     return None
 # =============================================================================

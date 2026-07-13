@@ -13,12 +13,17 @@ import pandas as pd
 import streamlit as st
 
 from utils.data_manager import (
+    available_to_vial,
     clear_specimen_records_cache,
+    fetch_batch_children,
     load_specimen_records,
     submit_site_log_entry,
+    vial_out_specimens,
 )
 from utils.icons import render_page_header
 from utils.pcr_and_accuracy import render_specimen_qr
+
+_SUBSAMPLE_GENERA = ["Anopheles", "Culex", "Aedes"]
 
 _BREEDING_SITE_OPTIONS = [
     "Stagnant pool",
@@ -135,7 +140,123 @@ def render_site_log_page():
                     st.error("Entry was not saved — check the database connection and try again.")
 
     st.markdown("---")
+    _render_subsampling()
+
+    st.markdown("---")
     _render_recent_entries()
+
+
+def _batch_label(row) -> str:
+    """Human-readable label for a batch in the subsampling selector, showing how many
+    of each genus remain available to vial out."""
+    avail = " ".join(
+        f"{g[:2]}:{available_to_vial(row, g)}" for g in _SUBSAMPLE_GENERA
+    )
+    date_str = str(row.get("collection_date") or "?")
+    site = row.get("breeding_site_type") or "site n/a"
+    return f"{date_str} · {site} · [{avail}] · {str(row.get('specimen_id'))[:8]}"
+
+
+def _render_child_labels(children: list, key_prefix: str) -> None:
+    """Render a printable QR label per vialed specimen, three across."""
+    for start in range(0, len(children), 3):
+        cols = st.columns(3)
+        for col, child in zip(cols, children[start:start + 3]):
+            with col:
+                tube = child.get("tube_label")
+                caption = f"{tube}" if tube else str(child["specimen_id"])[:8]
+                render_specimen_qr(
+                    child["specimen_id"],
+                    caption=caption,
+                    key=f"{key_prefix}_{child['specimen_id']}",
+                    width=150,
+                )
+
+
+def _render_subsampling():
+    """Vial out individual specimens from a batch field-count log so each can be
+    barcoded, identified, and PCR-confirmed on its own — matching a single
+    morphological ID to a single molecular result per mosquito."""
+    st.subheader("Subsample Specimens for PCR")
+    st.caption(
+        "A field count logs many mosquitoes as one batch. To confirm species by PCR, "
+        "'vial out' individual specimens: each gets its own QR/barcode and can be "
+        "identified and PCR-confirmed separately. The batch's original counts are kept "
+        "intact — vialed specimens are just tracked individually so totals never double-count."
+    )
+
+    df = load_specimen_records()
+    if df.empty or "field_screening_result" not in df.columns:
+        st.info("No batch field-count logs yet. Save a site log entry above first.")
+        return
+
+    def _is_field_log(result):
+        return isinstance(result, dict) and result.get("screening_method") == "manual_field_log"
+
+    batches = df[df["field_screening_result"].apply(_is_field_log)].copy()
+    if batches.empty:
+        st.info("No batch field-count logs yet. Save a site log entry above first.")
+        return
+
+    batch_rows = batches.to_dict("records")
+    labels = {_batch_label(r): r for r in batch_rows}
+    chosen_label = st.selectbox("Batch collection event", list(labels.keys()), key="subsample_batch")
+    batch = labels[chosen_label]
+    batch_id = batch["specimen_id"]
+
+    available = {g: available_to_vial(batch, g) for g in _SUBSAMPLE_GENERA}
+    selectable = [g for g, n in available.items() if n > 0]
+
+    if not selectable:
+        st.warning("Every counted specimen in this batch has already been vialed out.")
+    else:
+        col1, col2, col3 = st.columns([2, 1, 2])
+        with col1:
+            genus = st.selectbox(
+                "Genus to subsample",
+                selectable,
+                format_func=lambda g: f"{g} ({available[g]} available)",
+                key="subsample_genus",
+            )
+        with col2:
+            count = st.number_input(
+                "How many", min_value=1, max_value=int(available[genus]), value=1, step=1,
+                key="subsample_count",
+            )
+        with col3:
+            tube_prefix = st.text_input(
+                "Tube label prefix (optional)", placeholder="e.g. LAB-2026-07",
+                key="subsample_prefix",
+            )
+
+        if st.button(f"Vial out {int(count)} {genus} specimen(s)", type="primary", key="subsample_go"):
+            with st.spinner("Creating individual specimen records…"):
+                children = vial_out_specimens(
+                    batch_id, genus, int(count), tube_prefix.strip() or None
+                )
+            if children:
+                st.success(
+                    f"Vialed out {len(children)} {genus} specimen(s). Print each label and "
+                    f"attach it to that specimen's tube — scan it later to record the "
+                    f"morphological ID and PCR result for that individual."
+                )
+                _render_child_labels(children, key_prefix="fresh")
+
+    # Existing individuals already vialed out of this batch (for reprint / PCR tracking).
+    existing = fetch_batch_children(batch_id)
+    if not existing.empty:
+        with st.expander(f"Individuals already vialed from this batch ({len(existing)})"):
+            cols = [c for c in ["tube_label", "specimen_id", "pcr_status", "pcr_confirmed_species"] if c in existing.columns]
+            st.dataframe(
+                existing[cols].rename(columns={
+                    "tube_label": "Tube",
+                    "specimen_id": "Specimen ID (QR)",
+                    "pcr_status": "PCR Status",
+                    "pcr_confirmed_species": "PCR Species",
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 
 def _render_recent_entries():
