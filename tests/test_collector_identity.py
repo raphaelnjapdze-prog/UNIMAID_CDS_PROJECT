@@ -126,6 +126,52 @@ class TestBlankIdIsNotAnIdentity:
         st.session_state.clear()
 
 
+class TestCollectorIsShownReadably:
+    """collector_id is a UUID. Tables and exports have to show a person."""
+
+    def test_prefers_the_stamped_label(self):
+        row = {
+            "collector_id": "9f3c1e88-1111-2222-3333-444455556666",
+            "field_screening_result": {"collector_label": "A. Musa"},
+        }
+        assert data_manager.extract_collector_display(row) == "A. Musa"
+
+    def test_legacy_rows_say_so_rather_than_naming_anyone(self):
+        # The author of these was never recorded and cannot be recovered. Showing a guess
+        # would put someone's name on work that may not be theirs.
+        row = {"collector_id": "unattributed-legacy", "field_screening_result": {}}
+        assert data_manager.extract_collector_display(row) == "Unattributed (pre-identity record)"
+
+    def test_row_without_a_label_falls_back_to_a_short_id(self):
+        # Written after collector_id was enforced but before the label existed: the cell
+        # must still say something, never sit blank.
+        row = {
+            "collector_id": "9f3c1e88-1111-2222-3333-444455556666",
+            "field_screening_result": {},
+        }
+        assert data_manager.extract_collector_display(row) == "ID 9f3c1e88…"
+
+    def test_json_string_column_is_parsed(self):
+        row = {
+            "collector_id": "abc",
+            "field_screening_result": '{"collector_label": "A. Musa"}',
+        }
+        assert data_manager.extract_collector_display(row) == "A. Musa"
+
+    def test_dataframe_gets_a_collector_column(self):
+        import pandas as pd
+
+        df = pd.DataFrame([
+            {"collector_id": "u1", "field_screening_result": {"collector_label": "A. Musa"}},
+            {"collector_id": "unattributed-legacy", "field_screening_result": {}},
+        ])
+        out = data_manager.add_collector_column(df)
+
+        assert list(out["Collector"]) == ["A. Musa", "Unattributed (pre-identity record)"]
+        # The source frame is not mutated — callers reuse it for exports.
+        assert "Collector" not in df.columns
+
+
 class TestCollectorLabelFallback:
     def test_falls_back_to_email_when_no_display_name(self):
         # Supabase accounts created without full_name in user_metadata have no name.

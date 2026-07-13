@@ -773,6 +773,53 @@ def extract_genus_counts_from_screening(field_screening_result: dict) -> dict:
     return {}
 
 
+# The sentinel sql/enforce_collector_id.sql backfills onto rows written before identity
+# was enforced. Their author was never recorded anywhere and cannot be recovered, so they
+# are labelled as what they are rather than attributed to a guess.
+UNATTRIBUTED_LEGACY = "unattributed-legacy"
+
+
+def extract_collector_display(row) -> str:
+    """The collector to show for one specimen_records row, for tables and exports.
+
+    Prefers the human-readable collector_label stamped into field_screening_result at
+    write time; a bare collector_id is a UUID, which tells a reader nothing. Falls back to
+    a truncated id for rows written before the label existed, so the cell is never blank —
+    an empty Collector column is exactly the ambiguity this whole change set removed.
+    """
+    if not isinstance(row, dict):
+        return "Unknown"
+
+    collector_id = str(row.get("collector_id") or "").strip()
+    if collector_id == UNATTRIBUTED_LEGACY:
+        return "Unattributed (pre-identity record)"
+
+    screening = row.get("field_screening_result") or {}
+    if isinstance(screening, str):
+        try:
+            screening = json.loads(screening)
+        except Exception:
+            logger.debug("Could not JSON-decode field_screening_result for collector display", exc_info=True)
+            screening = {}
+    label = (screening.get("collector_label") or "").strip() if isinstance(screening, dict) else ""
+
+    if label:
+        return label
+    if collector_id:
+        # Pre-label row: show enough of the id to tell two collectors apart, no more.
+        return f"ID {collector_id[:8]}…"
+    return "Unknown"
+
+
+def add_collector_column(df: pd.DataFrame, column: str = "Collector") -> pd.DataFrame:
+    """Return a copy of a specimen_records DataFrame with a human-readable collector column."""
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    out[column] = [extract_collector_display(row) for row in out.to_dict("records")]
+    return out
+
+
 def extract_primary_genus(field_screening_result) -> str | None:
     """
     Single resolved genus for one specimen from an identification screening

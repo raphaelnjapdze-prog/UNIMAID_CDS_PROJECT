@@ -15,6 +15,7 @@ import streamlit as st
 from utils.data_manager import (
     available_to_vial,
     clear_specimen_records_cache,
+    extract_collector_display,
     fetch_batch_children,
     load_specimen_records,
     submit_site_log_entry,
@@ -285,8 +286,9 @@ def _render_recent_entries():
         return f"An:{r.get('anopheles_count',0)} Cx:{r.get('culex_count',0)} Ae:{r.get('aedes_count',0)}"
 
     log_df["counts"] = log_df["field_screening_result"].apply(_counts)
+    log_df["collector"] = [extract_collector_display(row) for row in log_df.to_dict("records")]
 
-    display_cols = ["collection_date", "breeding_site_type", "counts", "pcr_status"]
+    display_cols = ["collection_date", "breeding_site_type", "counts", "collector", "pcr_status"]
     display_cols = [c for c in display_cols if c in log_df.columns]
 
     st.dataframe(
@@ -294,6 +296,7 @@ def _render_recent_entries():
             "collection_date": "Date",
             "breeding_site_type": "Site Type",
             "counts": "Counts",
+            "collector": "Collector",
             "pcr_status": "PCR Status",
         }),
         use_container_width=True,

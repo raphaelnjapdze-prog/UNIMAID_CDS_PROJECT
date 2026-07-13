@@ -14,6 +14,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.data_manager import (
+    add_collector_column,
     classify_resistance_status,
     compute_mortality_percentage,
     extract_genus_counts_from_screening,
@@ -75,7 +76,10 @@ def _compile_specimen_excel(df: pd.DataFrame) -> io.BytesIO:
         site_breakdown = df.groupby(df["breeding_site_type"].fillna("Unspecified"))[genus_cols].sum().reset_index()
         site_breakdown.columns = ["Breeding Site Type"] + genus_cols
 
-    raw_export = df.drop(columns=["field_screening_result"], errors="ignore").copy()
+    # Resolve the collector name BEFORE dropping field_screening_result — the readable
+    # label lives inside that JSON, so dropping it first would leave only a bare UUID in
+    # the exported sheet.
+    raw_export = add_collector_column(df).drop(columns=["field_screening_result"], errors="ignore").copy()
     if "photo_urls" in raw_export.columns:
         raw_export["photo_urls"] = raw_export["photo_urls"].apply(
             lambda x: ", ".join(x) if isinstance(x, list) else ""
@@ -216,11 +220,12 @@ def render_reports_page():
                     int((processed["pcr_status"] == "confirmed").sum()) if "pcr_status" in processed.columns else 0,
                 )
 
+                shown = add_collector_column(processed)
                 display_cols = [c for c in [
-                    "collection_date", "breeding_site_type", "screening_method",
+                    "collection_date", "breeding_site_type", "screening_method", "Collector",
                     "Anopheles", "Culex", "Aedes", "Other", "pcr_status", "pcr_confirmed_species",
-                ] if c in processed.columns]
-                st.dataframe(processed[display_cols].head(20), use_container_width=True)
+                ] if c in shown.columns]
+                st.dataframe(shown[display_cols].head(20), use_container_width=True)
                 if len(processed) > 20:
                     st.caption(f"Showing 20 of {len(processed)} — full set included in exports below.")
 
@@ -274,7 +279,9 @@ def render_reports_page():
                         type="primary", use_container_width=True,
                     )
                 with ex2:
-                    csv_export = processed.drop(columns=["field_screening_result"], errors="ignore")
+                    csv_export = add_collector_column(processed).drop(
+                        columns=["field_screening_result"], errors="ignore"
+                    )
                     st.download_button(
                         "Download CSV", data=csv_export.to_csv(index=False),
                         file_name=f"specimen_report_{timestamp_str}.csv",

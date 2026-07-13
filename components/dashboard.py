@@ -17,7 +17,11 @@ import streamlit as st
 from streamlit_folium import st_folium
 
 from utils.auth import get_supabase_client
-from utils.data_manager import extract_primary_genus, load_specimen_records
+from utils.data_manager import (
+    add_collector_column,
+    extract_primary_genus,
+    load_specimen_records,
+)
 from utils.icons import render_page_header
 from utils.logging_config import get_logger
 
@@ -306,7 +310,10 @@ def render_dashboard_page():
 
     # ── Full ledger ────────────────────────────────────────────────────────
     with st.expander("View Complete Specimen Ledger"):
-        st.dataframe(df.drop(columns=["genus"], errors="ignore"), use_container_width=True)
+        # Show who recorded each specimen: collector_id alone is a UUID, which identifies
+        # nobody to a human reader.
+        ledger = add_collector_column(df.drop(columns=["genus"], errors="ignore"))
+        st.dataframe(ledger, use_container_width=True)
 
     # ── Footer / subscribe (real persistence, no fake success) ───────────
     st.markdown("<br><hr style='border-top:1px solid #e2e8f0; opacity:0.5;'>", unsafe_allow_html=True)
