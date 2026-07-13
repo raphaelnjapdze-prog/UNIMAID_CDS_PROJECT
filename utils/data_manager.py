@@ -29,6 +29,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.auth import (
+    get_collector_label,
     get_current_user_id,
     get_supabase_client,
     get_supabase_service_client,
@@ -154,6 +155,7 @@ def submit_site_log_entry(
                 "other_genera_count": int(other_genera_count),
                 "field_notes": field_notes,
             },
+            "collector_label": get_collector_label() or None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
         "pcr_status": "not_submitted",
@@ -236,8 +238,11 @@ def submit_multi_angle_capture_entry(
             "result": {
                 "angles": angle_records,
                 "angles_captured": [k for k, r in angle_records.items() if r["photo_url"]],
+                # Who physically collected it — may be a field assistant, so it is a free
+                # label and NOT the account identity stamped alongside it.
                 "field_collector_label": field_collector_label or None,
             },
+            "collector_label": get_collector_label() or None,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
         "pcr_status": "not_submitted",
@@ -535,9 +540,14 @@ def attach_identification_to_specimen(
     elif prior.get("subsampled_genus"):
         subsampled_genus = prior["subsampled_genus"]
 
+    # Who identified this specimen, which is not necessarily who collected it: the row's
+    # collector_id belongs to whoever logged the batch it was vialed out of, and that
+    # column stays theirs. Overwriting it would rewrite the collection event's history.
     field_screening_result = {
         "screening_method": screening_method,
         "result": result,
+        "identified_by_id": get_current_user_id() or None,
+        "identified_by_label": get_collector_label() or None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if subsampled_genus:

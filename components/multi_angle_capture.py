@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 import streamlit as st
 from PIL import Image
 
+from utils.auth import get_collector_label
 from utils.data_manager import submit_multi_angle_capture_entry
 from utils.image_quality_control import assess_image_quality
 
@@ -248,7 +249,26 @@ def _render_summary() -> None:
             st.info(f"{angle['title']}: pending")
 
     st.markdown("---")
-    st.text_input("Collector ID", key="capture_collector_id")
+
+    # Prefill with the signed-in user rather than leaving it blank, but keep it editable:
+    # one account is often used to record a capture made by a field assistant, and this
+    # box is that person's name. It is a label, not identity — the account's own id and
+    # name are stamped onto the record separately, and cannot be typed over here.
+    signed_in_as = get_collector_label()
+    if signed_in_as and not st.session_state.get("capture_collector_id"):
+        st.session_state["capture_collector_id"] = signed_in_as
+
+    st.text_input(
+        "Collector",
+        key="capture_collector_id",
+        help="Who physically collected this specimen. Defaults to you; change it if you "
+             "are recording on someone else's behalf.",
+    )
+    if signed_in_as:
+        st.caption(f"Recording under the account of **{signed_in_as}**.")
+    else:
+        st.warning("You are not signed in — this capture cannot be attributed to a collector.")
+
     st.text_input("GPS coordinates (optional)", key="capture_gps_coordinates")
 
     if st.button("Submit specimen record", type="primary"):

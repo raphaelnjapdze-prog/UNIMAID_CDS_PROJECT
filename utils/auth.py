@@ -217,3 +217,19 @@ def get_current_user_id() -> str:
 def get_display_name() -> str:
     """Returns the active profile name to display in headers and banners."""
     return st.session_state.get("auth_user_name", "")
+
+
+def get_collector_label() -> str:
+    """Human-readable name for whoever is signed in, for stamping onto specimen records.
+
+    collector_id holds the auth UUID, which is what queries join on but is unreadable in
+    an exported CSV or a printed report. This is the name that goes beside it. Falls back
+    through name -> email -> id, since a Supabase account created without full_name in its
+    user_metadata has no display name at all.
+    """
+    return (
+        st.session_state.get("auth_user_name")
+        or st.session_state.get("auth_user_email")
+        or st.session_state.get("auth_user_id")
+        or ""
+    )

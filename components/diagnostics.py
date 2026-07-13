@@ -618,8 +618,10 @@ def _save_identification(
         )
     else:
         saved = submit_screening_result(screening_method=screening_method, result=result)
+        # submit_screening_result surfaces its own error on every failure path (not
+        # configured, not signed in, insert rejected) — a generic message here would
+        # paper over the specific reason it just showed the user.
         if not saved:
-            st.error("Could not save — check database connection.")
             return
         st.session_state["diag_save_message"] = f"Saved as specimen {saved['specimen_id']}"
 
