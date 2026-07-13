@@ -99,10 +99,20 @@ def sign_in_user(email: str, password: str):
 
     # Local fallback login is only available when an admin password has been
     # configured via secrets/env. Without it, there is no offline bypass.
+    #
+    # ADMIN_USERNAME/ADMIN_EMAIL come from secrets and may be unset. Calling .lower() on
+    # an unset one raised AttributeError mid-login; worse, coercing it to "" would let a
+    # submitted empty email match an admin identity that was never configured. Drop the
+    # blanks so an unconfigured identity matches nothing at all.
+    admin_identities = {
+        identity.strip().lower()
+        for identity in (ADMIN_USERNAME, ADMIN_EMAIL)
+        if identity and identity.strip()
+    }
     if (
         ADMIN_PASSWORD
         and password == ADMIN_PASSWORD
-        and email.strip().lower() in (ADMIN_USERNAME.lower(), ADMIN_EMAIL.lower())
+        and email.strip().lower() in admin_identities
     ):
         return {"user": {"email": ADMIN_EMAIL, "id": "local-admin", "user_metadata": {"full_name": "Administrator"}}}
     return None

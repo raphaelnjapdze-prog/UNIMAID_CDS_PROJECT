@@ -715,7 +715,7 @@ def _genus_from_label(label: str | None) -> str | None:
     return None
 
 
-def extract_genus_counts_from_screening(field_screening_result: dict) -> dict:
+def extract_genus_counts_from_screening(field_screening_result: dict | None) -> dict:
     """
     Returns {genus: count} contributed by one specimen_records row.
     manual_field_log entries contribute their raw counts; single-specimen

@@ -10,6 +10,7 @@ import csv
 import json
 import os
 from datetime import datetime
+from typing import cast
 
 import folium
 import pandas as pd
@@ -77,7 +78,10 @@ def _build_dhis2_payload(df: pd.DataFrame) -> str:
     data_values = []
     if not working.empty:
         grouped = working.groupby(["collection_date", "breeding_site_type", "genus"]).size()
-        for (date, site, genus), count in grouped.items():
+        # .items() yields the MultiIndex key as a Hashable; it is a 3-tuple here, but the
+        # type checker cannot know that from the groupby, so name the parts explicitly.
+        for key, count in grouped.items():
+            date, site, genus = cast(tuple, key)
             period = pd.to_datetime(date).strftime("%Y%m%d") if pd.notna(date) else datetime.now().strftime("%Y%m%d")
             org_unit = f"SITE_{str(site or 'UNSPECIFIED').upper().replace(' ', '_')}"
             element_map = {"Anopheles": "ZVD_LDI_001", "Culex": "ZVD_LDI_002", "Aedes": "ZVD_LDI_003"}

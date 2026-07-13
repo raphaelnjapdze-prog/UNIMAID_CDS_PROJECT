@@ -12,6 +12,8 @@ import io
 
 import pandas as pd
 import streamlit as st
+from openpyxl.styles import Font
+from openpyxl.utils import get_column_letter
 
 from utils.data_manager import (
     add_collector_column,
@@ -28,11 +30,30 @@ from utils.pcr_and_accuracy import render_specimen_qr
 # =========================================================================
 # Helpers — specimen surveillance side
 # =========================================================================
+def _style_workbook(workbook) -> None:
+    """Bold the header row and widen every column to fit its content.
+
+    Column widths are keyed off the column's index rather than col[0].column_letter: the
+    first cell of a column can be a MergedCell, which has no column_letter at all, so that
+    lookup raises AttributeError on any sheet with a merged cell in row 1.
+    """
+    for sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for idx, col in enumerate(ws.columns, start=1):
+            max_len = max((len(str(c.value or "")) for c in col), default=10)
+            ws.column_dimensions[get_column_letter(idx)].width = max(max_len + 3, 12)
+
+
 def _flatten_specimen_df(df: pd.DataFrame) -> pd.DataFrame:
     """Adds readable genus count and identification-summary columns derived
     from field_screening_result, without mutating the caller's copy."""
     out = df.copy()
-    out["collection_date"] = pd.to_datetime(out.get("collection_date"), errors="coerce")
+    if "collection_date" in out.columns:
+        out["collection_date"] = pd.to_datetime(out["collection_date"], errors="coerce")
+    else:
+        out["collection_date"] = pd.NaT
 
     genus_totals = {"Anopheles": [], "Culex": [], "Aedes": [], "Other": []}
     methods = []
@@ -91,14 +112,7 @@ def _compile_specimen_excel(df: pd.DataFrame) -> io.BytesIO:
             site_breakdown.to_excel(writer, sheet_name="Site_Type_Breakdown", index=False)
         raw_export.to_excel(writer, sheet_name="Raw_Records", index=False)
 
-        workbook = writer.book
-        for sheet_name in workbook.sheetnames:
-            ws = workbook[sheet_name]
-            for cell in ws[1]:
-                cell.font = cell.font.copy(bold=True)
-            for col in ws.columns:
-                max_len = max((len(str(c.value or "")) for c in col), default=10)
-                ws.column_dimensions[col[0].column_letter].width = max(max_len + 3, 12)
+        _style_workbook(writer.book)
 
     buffer.seek(0)
     return buffer
@@ -134,14 +148,7 @@ def _compile_bioassay_excel(df: pd.DataFrame) -> io.BytesIO:
         summary.to_excel(writer, sheet_name="Treatment_Summary", index=False)
         df.to_excel(writer, sheet_name="Raw_Replicates", index=False)
 
-        workbook = writer.book
-        for sheet_name in workbook.sheetnames:
-            ws = workbook[sheet_name]
-            for cell in ws[1]:
-                cell.font = cell.font.copy(bold=True)
-            for col in ws.columns:
-                max_len = max((len(str(c.value or "")) for c in col), default=10)
-                ws.column_dimensions[col[0].column_letter].width = max(max_len + 3, 12)
+        _style_workbook(writer.book)
 
     buffer.seek(0)
     return buffer
@@ -179,9 +186,17 @@ def render_reports_page():
                         start_date, end_date = min_date, max_date
                         st.info(f"Single date in dataset: {min_date}")
                     else:
-                        start_date, end_date = st.date_input(
+                        # st.date_input returns a 1-tuple between the two clicks of a range
+                        # selection (and an empty one if cleared). Unpacking it straight
+                        # into two names raises ValueError and takes the page down mid-pick.
+                        picked = st.date_input(
                             "Date range", value=(min_date, max_date), min_value=min_date, max_value=max_date
                         )
+                        if isinstance(picked, (tuple, list)) and len(picked) == 2:
+                            start_date, end_date = picked
+                        else:
+                            # Mid-selection: keep the full window until they choose an end.
+                            start_date, end_date = min_date, max_date
                 else:
                     start_date, end_date = None, None
                     st.info("No valid collection dates in this dataset.")

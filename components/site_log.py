@@ -251,12 +251,28 @@ def _render_subsampling():
                     batch_id, genus, int(count), tube_prefix.strip() or None
                 )
             if children:
-                st.success(
-                    f"Vialed out {len(children)} {genus} specimen(s). Print each label and "
-                    f"attach it to that specimen's tube — scan it later to record the "
-                    f"morphological ID and PCR result for that individual."
-                )
-                _render_child_labels(children, key_prefix="fresh")
+                st.session_state["vialed_children"] = {
+                    "batch_id": batch_id, "genus": genus, "children": children,
+                }
+
+    # Rendered outside the button block, from session_state. Drawn inline, these labels
+    # lived only for the run that created them: clicking one label's download button
+    # triggers a rerun, the button block is False on it, and every label — including the
+    # one being downloaded — disappeared before the user could print the rest.
+    #
+    # Tied to the batch that produced them, so selecting a different batch doesn't leave
+    # the previous batch's labels sitting under it, inviting them onto the wrong tubes.
+    fresh = st.session_state.get("vialed_children")
+    if fresh and fresh.get("children") and fresh.get("batch_id") == batch_id:
+        st.success(
+            f"Vialed out {len(fresh['children'])} {fresh['genus']} specimen(s). Print each "
+            f"label and attach it to that specimen's tube — scan it later to record the "
+            f"morphological ID and PCR result for that individual."
+        )
+        _render_child_labels(fresh["children"], key_prefix="fresh")
+        if st.button("Done printing labels", key="subsample_dismiss"):
+            st.session_state.pop("vialed_children", None)
+            st.rerun()
 
     # Existing individuals already vialed out of this batch (for reprint / PCR tracking).
     existing = fetch_batch_children(batch_id)

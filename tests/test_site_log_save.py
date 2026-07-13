@@ -37,6 +37,48 @@ def _site_log_app():
     site_log.render_site_log_page()
 
 
+class TestVialedLabelsSurviveTheirOwnDownload:
+    """The QR labels for freshly vialed specimens were drawn inside an `if st.button(...)`
+    block, so they lived only for the run that created them. Clicking one label's download
+    button triggers a rerun on which that block is False — so every label, including the
+    one being downloaded, vanished before the user could print the rest of the tubes."""
+
+    def test_labels_persist_across_a_rerun(self, monkeypatch):
+        import components.site_log as site_log
+
+        batch = {
+            "specimen_id": "batch-1",
+            "collection_date": "2026-07-13",
+            "breeding_site_type": "Puddle",
+            "field_screening_result": {
+                "screening_method": "manual_field_log",
+                "result": {"anopheles_count": 10},
+            },
+        }
+        children = [
+            {"specimen_id": "child-1", "tube_label": "T-1"},
+            {"specimen_id": "child-2", "tube_label": "T-2"},
+        ]
+
+        monkeypatch.setattr(site_log, "load_specimen_records", lambda: pd.DataFrame([batch]))
+        monkeypatch.setattr(site_log, "available_to_vial", lambda row, genus: 10 if genus == "Anopheles" else 0)
+        monkeypatch.setattr(site_log, "vial_out_specimens", lambda *a, **k: children)
+        monkeypatch.setattr(site_log, "fetch_batch_children", lambda _bid: pd.DataFrame())
+        monkeypatch.setattr(site_log, "submit_site_log_entry", lambda **k: None)
+        monkeypatch.setattr(site_log, "clear_specimen_records_cache", lambda: None)
+
+        at = AppTest.from_function(_site_log_app, default_timeout=30)
+        at.run()
+
+        at.button(key="subsample_go").click().run()
+        assert any("Vialed out 2" in s.value for s in at.success)
+
+        at.run()  # the rerun a label's download button would cause
+
+        assert not at.exception
+        assert any("Vialed out 2" in s.value for s in at.success)
+
+
 class TestSaveRendersTheQrLabel:
     def test_successful_save_does_not_crash_the_page(self, saved_rows):
         at = AppTest.from_function(_site_log_app, default_timeout=30)
