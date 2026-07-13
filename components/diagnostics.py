@@ -8,6 +8,8 @@ Both stages cap results honestly — Undetermined stays Undetermined, complex
 members stay complex-level, never a forced single species guess.
 """
 
+import hashlib
+
 import pandas as pd
 import streamlit as st
 
@@ -369,27 +371,34 @@ def _render_anopheles_deep_key(target: str | None = None):
             run_id = st.button("Identify Anopheles", type="primary", use_container_width=True, key="anoph_identify")
         with col2:
             st.markdown("##### Result")
-            if run_id:
-                if not observed:
-                    st.info("Set at least one character on the left, then click **Identify Anopheles**.")
-                else:
-                    with st.spinner("Scoring diagnostic characters…"):
-                        res = identify_anopheles_species(observed)
-                    _render_anopheles_identification(res)
+            # Compute on click but hold the result in session_state, so the Save button
+            # below is still rendered on the rerun that its own click triggers. Rendered
+            # only inside `if run_id:`, it would never see that click at all.
+            if run_id and not observed:
+                st.session_state.pop("anoph_char_result", None)
+                st.info("Set at least one character on the left, then click **Identify Anopheles**.")
+            elif run_id:
+                with st.spinner("Scoring diagnostic characters…"):
+                    st.session_state["anoph_char_result"] = identify_anopheles_species(observed)
 
-                    if res.get("resolution_level") not in ("undetermined", "genus"):
-                        st.markdown("---")
-                        _save_identification(
-                            "💾 Save this Anopheles result",
-                            "save_anoph_char",
-                            "manual_checklist",
-                            {
-                                "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
-                                "anopheles_deep_key": res,
-                            },
-                            target,
-                        )
-            else:
+            res = st.session_state.get("anoph_char_result")
+            if res:
+                _render_anopheles_identification(res)
+
+                if res.get("resolution_level") not in ("undetermined", "genus"):
+                    st.markdown("---")
+                    _save_identification(
+                        "💾 Save this Anopheles result",
+                        "save_anoph_char",
+                        "manual_checklist",
+                        {
+                            "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
+                            "anopheles_deep_key": res,
+                        },
+                        target,
+                        result_key="anoph_char_result",
+                    )
+            elif not run_id:
                 st.info("Set characters on the left and click **Identify Anopheles**.")
         return
 
@@ -458,6 +467,28 @@ def _render_anopheles_deep_key(target: str | None = None):
 
 
 _NEW_SPECIMEN = "— New specimen (create a new record) —"
+
+
+def _screen_image_once(uploaded, cache_key: str, infer) -> dict:
+    """Run vision inference once per uploaded image, reusing the result across reruns.
+
+    st.file_uploader keeps its value across reruns, so calling `infer` unconditionally
+    re-invokes the model on every interaction — including the rerun that a Save click
+    triggers. The model is non-deterministic, so the result saved could differ from the
+    one the user actually reviewed and approved. Key the result to the image's bytes:
+    the same photo always yields the identification already on screen, and a new upload
+    invalidates it.
+    """
+    digest = hashlib.sha256(uploaded.getvalue()).hexdigest()
+    cached = st.session_state.get(cache_key)
+    if cached and cached["digest"] == digest:
+        return cached["result"]
+
+    uploaded.seek(0)  # inference reads the stream; getvalue() above left it at the end
+    with st.spinner("Running AI-assisted visual screening…"):
+        result = infer(uploaded)
+    st.session_state[cache_key] = {"digest": digest, "result": result}
+    return result
 
 
 def _pending_specimen_options() -> dict:
@@ -551,13 +582,22 @@ def _render_link_banner(target: str | None) -> None:
 
 
 def _save_identification(
-    label: str, key: str, screening_method: str, result: dict, target: str | None
+    label: str,
+    key: str,
+    screening_method: str,
+    result: dict,
+    target: str | None,
+    result_key: str | None = None,
 ) -> None:
     """Render the save button for an identification result and route the write.
 
     Routes to attach_identification_to_specimen when `target` is a linked vialed-out
     specimen (so it is updated, not duplicated), otherwise creates a new record. Never
     reports success it didn't get — a failed write shows an error.
+
+    On success the scored result at `result_key` is dropped and the page reruns, so the
+    panel resets. Without that, the (now working) button stays live on a result already
+    written, and clicking it again inserts a second record for the same mosquito.
     """
     if not st.button(label, key=key):
         return
@@ -566,30 +606,33 @@ def _save_identification(
         saved = attach_identification_to_specimen(
             specimen_id=target, screening_method=screening_method, result=result
         )
-        if saved:
-            # Drop the link so the next identification cannot silently overwrite the
-            # specimen just saved. The rerun is what lets the widgets be cleared legally.
-            st.session_state["diag_saved_specimen"] = str(target)
-            st.session_state["diag_clear_link_pending"] = True
-            st.rerun()
         # attach_identification_to_specimen surfaces its own error on every failure path.
-        return
-
-    saved = submit_screening_result(screening_method=screening_method, result=result)
-    if saved:
-        st.success(f"Saved as specimen {saved['specimen_id']}")
+        if not saved:
+            return
+        # Drop the link too, so the next identification cannot silently overwrite the
+        # specimen just saved.
+        st.session_state["diag_clear_link_pending"] = True
+        st.session_state["diag_save_message"] = (
+            f"Identification saved onto specimen {str(target)[:8]}… — the link has been "
+            f"cleared, so the next result will not overwrite it."
+        )
     else:
-        st.error("Could not save — check database connection.")
+        saved = submit_screening_result(screening_method=screening_method, result=result)
+        if not saved:
+            st.error("Could not save — check database connection.")
+            return
+        st.session_state["diag_save_message"] = f"Saved as specimen {saved['specimen_id']}"
+
+    if result_key:
+        st.session_state.pop(result_key, None)
+    st.rerun()
 
 
 def render_diagnostics_page(active_df: pd.DataFrame = None):
-    # Survives the rerun that clears the link after a successful attach.
-    just_saved = st.session_state.pop("diag_saved_specimen", None)
-    if just_saved:
-        st.success(
-            f"Identification saved onto specimen {just_saved[:8]}… — the link has been "
-            f"cleared, so the next result will not overwrite it."
-        )
+    # Survives the rerun that resets the panel after a successful save.
+    save_message = st.session_state.pop("diag_save_message", None)
+    if save_message:
+        st.success(save_message)
 
     target = _render_specimen_link()
     st.session_state["diag_linked_specimen"] = target
@@ -658,20 +701,33 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
 
             with col2:
                 st.markdown("#### Results")
+                # Snapshot the inputs alongside the triage, so the result stays rendered
+                # across the rerun that a Save click causes — and so what gets saved is
+                # exactly what produced what is on screen, not whatever the widgets read
+                # at save time.
                 if run:
-                    if sex == "Male":
+                    with st.spinner("Scoring genus traits…"):
+                        st.session_state["adult_checklist_result"] = {
+                            "triage": evaluate_genus_triage(payload),
+                            "sex": sex,
+                            "traits": payload,
+                            "markers": selected_markers,
+                        }
+
+                scored = st.session_state.get("adult_checklist_result")
+                if scored:
+                    if scored["sex"] == "Male":
                         st.warning(
                             "Male specimen — genitalia dissection is the standard "
                             "confirmatory method for males. Results below are indicative only."
                         )
-                    with st.spinner("Scoring genus traits…"):
-                        triage = evaluate_genus_triage(payload)
+                    triage = scored["triage"]
                     genus = _render_genus_result(triage)
 
                     if genus:
-                        markers_for_search = list(payload.values()) + selected_markers
+                        markers_for_search = list(scored["traits"].values()) + scored["markers"]
                         candidates = search_species_reference(genus, markers_for_search)
-                        _render_species_candidates(candidates, markers_ticked=bool(selected_markers))
+                        _render_species_candidates(candidates, markers_ticked=bool(scored["markers"]))
 
                         # ── Save this checklist result ──────────────────
                         st.markdown("---")
@@ -684,6 +740,7 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
                                 "species_candidates": candidates,
                             },
                             target,
+                            result_key="adult_checklist_result",
                         )
                 else:
                     st.info("Set traits on the left and click **Resolve**.")
@@ -703,8 +760,9 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
             with col2:
                 st.markdown("#### AI Screening Result")
                 if uploaded_adult:
-                    with st.spinner("Running AI-assisted visual screening…"):
-                        result = process_adult_image_inference(uploaded_adult)
+                    result = _screen_image_once(
+                        uploaded_adult, "vision_adult_cache", process_adult_image_inference
+                    )
                     _render_vision_result(result, is_larval=False)
 
                     # ── Save this AI screening result ──────────────────
@@ -763,11 +821,16 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
 
             with col2:
                 st.markdown("#### Result")
+                # Held in session_state so the Save button survives the rerun its own
+                # click triggers — see the adult checklist above.
                 if run_larval:
-                    result = match_larval_morphology({
+                    st.session_state["larval_checklist_result"] = match_larval_morphology({
                         "posture":       posture,
                         "siphon_length": siphon_length,
                     })
+
+                result = st.session_state.get("larval_checklist_result")
+                if result:
                     st.markdown(f"### {result['genus']}")
                     tier = result.get("confidence_tier")
                     if tier:
@@ -786,6 +849,7 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
                         "manual_checklist",
                         result,
                         target,
+                        result_key="larval_checklist_result",
                     )
                 else:
                     st.info("Set the characters and click **Resolve Genus**.")
@@ -803,8 +867,9 @@ def render_diagnostics_page(active_df: pd.DataFrame = None):
             with col2:
                 st.markdown("#### AI Screening Result")
                 if uploaded_larva:
-                    with st.spinner("Running AI-assisted visual screening…"):
-                        result = process_larval_image_inference(uploaded_larva)
+                    result = _screen_image_once(
+                        uploaded_larva, "vision_larval_cache", process_larval_image_inference
+                    )
                     _render_vision_result(result, is_larval=True)
 
                     # ── Save this AI screening result ──────────────────
