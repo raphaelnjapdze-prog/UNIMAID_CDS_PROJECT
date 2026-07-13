@@ -25,6 +25,8 @@ ENV/
 
 # ── App-generated data & artifacts ───────────────────────
 data/subscribers.csv
+data/investigator_profile.json
+data/profile_avatar.*
 uploaded_field_sheets/
 debug_*.txt
 *.log
