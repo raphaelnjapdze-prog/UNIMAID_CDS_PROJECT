@@ -65,8 +65,7 @@ Works at the intersection of field vector surveillance and applied data science 
 | Based in | Maiduguri, Borno State, Nigeria — working across Africa |
 | Email | raphaelnjapdze@gmail.com |
 | Phone / WhatsApp | *[add before sending]* |
-| Website | *[www.vdamkc.com — add once live]* |
-| Registered entity | *[Reg. no. — add once registered]* |
+| Website | vdamkc.netlify.app |
 | Focus areas | Vector surveillance · insecticide-resistance monitoring · malaria risk analytics |
 
 *Malaria burden figures cited in supporting materials: WHO World Malaria Report 2025.*
