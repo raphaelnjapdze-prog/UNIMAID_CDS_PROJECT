@@ -254,3 +254,108 @@ class TestSpecimensPendingIdentification:
     def test_frame_without_screening_column_returns_empty(self):
         df = pd.DataFrame([{"specimen_id": "s1"}])
         assert specimens_pending_identification(df).empty
+
+
+class TestVialOutRefusesASilentlyBlockedTally:
+    """RLS makes an unpermitted UPDATE a no-op, not an error: it matches zero rows and
+    raises nothing. vial_out_specimens trusted the call, so the children were created,
+    the batch kept its full raw counts, and the same mosquitoes were counted twice —
+    reported to the user as a success. The batch tally must be verified, not assumed."""
+
+    def _client(self, tally_rows):
+        """Fake Supabase where the batch tally UPDATE returns `tally_rows`."""
+        state = {"deleted": [], "inserted": []}
+
+        class Resp:
+            def __init__(self, data):
+                self.data = data
+
+        batch = self._batch()
+
+        class Table:
+            def __init__(self):
+                self.op = None
+                self.payload = None
+
+            def select(self, *_a, **_k):
+                self.op = "select"
+                return self
+
+            def insert(self, rows):
+                self.op = "insert"
+                self.payload = rows
+                return self
+
+            def update(self, _payload):
+                self.op = "update"
+                return self
+
+            def delete(self):
+                self.op = "delete"
+                return self
+
+            def eq(self, *_a, **_k):
+                return self
+
+            def in_(self, _col, ids):
+                self.payload = ids
+                return self
+
+            def execute(self):
+                if self.op == "select":
+                    return Resp([batch])
+                if self.op == "insert":
+                    state["inserted"] = self.payload
+                    return Resp(self.payload)
+                if self.op == "update":
+                    return Resp(tally_rows)          # [] == silently blocked by RLS
+                if self.op == "delete":
+                    state["deleted"] = self.payload
+                    return Resp([])
+                return Resp([])
+
+        class Client:
+            def table(self, _name): return Table()
+
+        return Client(), state
+
+    def _batch(self):
+        return {
+            "specimen_id": "batch-1",
+            "collection_date": "2026-07-13",
+            "collector_id": "user-1",
+            "breeding_site_type": "Puddle",
+            "gps_lat": None, "gps_lon": None,
+            "field_screening_result": {
+                "screening_method": "manual_field_log",
+                "result": {"anopheles_count": 500},
+            },
+        }
+
+    def test_blocked_tally_update_rolls_back_and_reports_failure(self, monkeypatch):
+        import utils.data_manager as dm
+
+        client, state = self._client(tally_rows=[])   # RLS silently blocks the UPDATE
+        monkeypatch.setattr(dm, "get_supabase_client", lambda: client)
+        monkeypatch.setattr(dm.st, "error", lambda *_a, **_k: None)
+        monkeypatch.setattr(dm, "clear_specimen_records_cache", lambda: None)
+
+        result = dm.vial_out_specimens("batch-1", "Anopheles", 3)
+
+        # No success is reported for a batch whose tally never moved, and the children
+        # created a moment earlier are deleted — otherwise they double-count.
+        assert result is None
+        assert len(state["deleted"]) == 3
+
+    def test_successful_tally_update_keeps_the_children(self, monkeypatch):
+        import utils.data_manager as dm
+
+        client, state = self._client(tally_rows=[{"specimen_id": "batch-1"}])
+        monkeypatch.setattr(dm, "get_supabase_client", lambda: client)
+        monkeypatch.setattr(dm.st, "error", lambda *_a, **_k: None)
+        monkeypatch.setattr(dm, "clear_specimen_records_cache", lambda: None)
+
+        result = dm.vial_out_specimens("batch-1", "Anopheles", 3)
+
+        assert result is not None and len(result) == 3
+        assert state["deleted"] == []

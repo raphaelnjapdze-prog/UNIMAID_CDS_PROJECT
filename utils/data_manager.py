@@ -441,10 +441,19 @@ def vial_out_specimens(
         return None
 
     inserted = response_rows(insert_response) or children
+
+    def _rollback_children(reason: str) -> None:
+        try:
+            child_ids = [c["specimen_id"] for c in inserted]
+            client.table("specimen_records").delete().in_("specimen_id", child_ids).execute()
+        except Exception:
+            logger.error("Rollback of subsampled children failed — manual cleanup needed", exc_info=True)
+        st.error(f"Could not update the batch tally, so vialing was rolled back: {reason}")
+
     try:
         updated_screening = dict(field_screening)
         updated_screening["result"] = _apply_vialed_out(result, genus, count)
-        (
+        tally_response = (
             client.table("specimen_records")
             .update({"field_screening_result": updated_screening})
             .eq("specimen_id", batch_specimen_id)
@@ -452,12 +461,22 @@ def vial_out_specimens(
         )
     except Exception as e:
         logger.exception("Vial-out batch tally update failed; rolling back children")
-        try:
-            child_ids = [c["specimen_id"] for c in inserted]
-            client.table("specimen_records").delete().in_("specimen_id", child_ids).execute()
-        except Exception:
-            logger.error("Rollback of subsampled children failed — manual cleanup needed", exc_info=True)
-        st.error(f"Could not update the batch tally, so vialing was rolled back: {e}")
+        _rollback_children(str(e))
+        return None
+
+    # An UPDATE that no RLS policy permits does not raise — it matches zero rows and
+    # silently does nothing. Trusting the call to have worked left the batch holding its
+    # full raw counts while each child also contributed 1: the same mosquitoes counted
+    # twice, reported as a success. Verify the row actually changed, and roll back if not.
+    if first_row(tally_response) is None:
+        logger.error(
+            "Vial-out tally update for batch %s matched no rows; rolling back children",
+            batch_specimen_id,
+        )
+        _rollback_children(
+            "the database accepted no change to the batch — check that an UPDATE policy "
+            "exists on specimen_records (sql/add_update_policies.sql)"
+        )
         return None
 
     clear_specimen_records_cache()
