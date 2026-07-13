@@ -81,7 +81,7 @@ class TestIdentificationsAreAttributed:
     def test_unauthenticated_save_is_refused(self, monkeypatch, written):
         st.session_state.clear()  # nobody signed in
         errors = []
-        monkeypatch.setattr(specimen_submission.st, "error", errors.append)
+        monkeypatch.setattr(data_manager.st, "error", errors.append)
 
         saved = specimen_submission.submit_screening_result(
             screening_method="manual_checklist", result={"genus": "Anopheles"}
@@ -91,6 +91,39 @@ class TestIdentificationsAreAttributed:
         assert saved is None
         assert not written
         assert errors
+
+
+class TestBlankIdIsNotAnIdentity:
+    """The live table declares collector_id NOT NULL — and still accumulated blank
+    collectors, because get_current_user_id() returns "" for a session with no user and
+    Postgres considers an empty string a perfectly good NOT NULL value. The constraint
+    never fired. The guard has to reject the blank itself, not rely on the database."""
+
+    def test_empty_string_user_id_is_refused(self, monkeypatch):
+        errors = []
+        monkeypatch.setattr(data_manager.st, "error", errors.append)
+        st.session_state.clear()
+        st.session_state["auth_user_id"] = ""
+
+        assert data_manager.require_current_user_id() is None
+        assert errors
+        st.session_state.clear()
+
+    def test_whitespace_only_user_id_is_refused(self, monkeypatch):
+        monkeypatch.setattr(data_manager.st, "error", lambda *_: None)
+        st.session_state.clear()
+        st.session_state["auth_user_id"] = "   "
+
+        assert data_manager.require_current_user_id() is None
+        st.session_state.clear()
+
+    def test_real_id_passes_through_stripped(self, monkeypatch):
+        monkeypatch.setattr(data_manager.st, "error", lambda *_: None)
+        st.session_state.clear()
+        st.session_state["auth_user_id"] = " user-uuid-123 "
+
+        assert data_manager.require_current_user_id() == "user-uuid-123"
+        st.session_state.clear()
 
 
 class TestCollectorLabelFallback:

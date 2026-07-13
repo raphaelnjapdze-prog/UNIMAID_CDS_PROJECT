@@ -10,11 +10,12 @@ from datetime import date, datetime, timezone
 
 import streamlit as st
 
-from utils.auth import get_collector_label, get_current_user_id, get_supabase_client
+from utils.auth import get_collector_label, get_supabase_client
 from utils.data_manager import (
     IDENTIFICATION_METHODS,
     clear_specimen_records_cache,
     first_row,
+    require_current_user_id,
 )
 from utils.logging_config import get_logger
 
@@ -47,13 +48,9 @@ def submit_screening_result(
         st.error("Supabase is not configured — this identification cannot be saved.")
         return None
 
-    # An identification nobody is accountable for is not worth storing: it never comes
-    # back from the user's own "Export my data" (which filters on collector_id), and no
-    # reviewer can tell who made the call on the specimen.
-    collector_id = collector_id or get_current_user_id()
+    collector_id = collector_id or require_current_user_id()
     if not collector_id:
-        st.error("You must be signed in to save an identification — no collector on record.")
-        return None
+        return None  # require_current_user_id already told the user why
 
     field_screening_result = {
         "screening_method": screening_method,

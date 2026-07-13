@@ -105,6 +105,24 @@ def upload_specimen_photo(uploaded_file, specimen_id: str) -> str | None:
     )
 
 
+def require_current_user_id() -> str | None:
+    """The signed-in user's id, or None (with an error shown) if there isn't one.
+
+    Every write that records who made it goes through this. get_current_user_id() returns
+    "" for a session with no user, and an empty string satisfies a NOT NULL constraint
+    just fine — which is how blank-collector rows got into specimen_records in the first
+    place, despite the column being declared NOT NULL. A row nobody is accountable for
+    never comes back from that user's own "Export my data" (which filters on collector_id)
+    and leaves no trace of who recorded it, so refuse the write rather than store it
+    anonymously.
+    """
+    user_id = (get_current_user_id() or "").strip()
+    if not user_id:
+        st.error("You must be signed in to save — no user on record for this entry.")
+        return None
+    return user_id
+
+
 # =============================================================================
 # 3. SITE LOG ENTRY — replaces the old CSV upload path entirely
 # =============================================================================
@@ -135,13 +153,17 @@ def submit_site_log_entry(
         st.error("Supabase is not configured — this entry cannot be saved.")
         return None
 
+    collector_id = require_current_user_id()
+    if collector_id is None:
+        return None
+
     specimen_id = str(uuid.uuid4())
     photo_url = upload_specimen_photo(photo_file, specimen_id) if photo_file else None
 
     record = {
         "specimen_id": specimen_id,
         "collection_date": collection_date.isoformat(),
-        "collector_id": get_current_user_id(),
+        "collector_id": collector_id,
         "gps_lat": gps_lat,
         "gps_lon": gps_lon,
         "breeding_site_type": breeding_site_type,
@@ -199,6 +221,10 @@ def submit_multi_angle_capture_entry(
         st.error("Supabase is not configured — this capture cannot be saved.")
         return None
 
+    collector_id = require_current_user_id()
+    if collector_id is None:
+        return None
+
     statuses = statuses or {}
     specimen_id = str(uuid.uuid4())
     photo_urls: list[str] = []
@@ -228,7 +254,7 @@ def submit_multi_angle_capture_entry(
     record = {
         "specimen_id": specimen_id,
         "collection_date": (collection_date or date.today()).isoformat(),
-        "collector_id": get_current_user_id(),
+        "collector_id": collector_id,
         "gps_lat": gps_lat,
         "gps_lon": gps_lon,
         "breeding_site_type": None,
@@ -821,6 +847,10 @@ def submit_bioassay_result(
         st.error("Knockdown count cannot exceed the number of mosquitoes exposed.")
         return None
 
+    submitted_by = require_current_user_id()
+    if submitted_by is None:
+        return None
+
     record = {
         "assay_date": assay_date.isoformat(),
         "treatment_name": treatment_name,
@@ -833,7 +863,7 @@ def submit_bioassay_result(
         "mortality_24hr": int(mortality_24hr),
         "species_tested": species_tested or None,
         "batch_reference": batch_reference or None,
-        "submitted_by": get_current_user_id(),
+        "submitted_by": submitted_by,
         "notes": notes or None,
     }
 
@@ -909,6 +939,10 @@ def submit_clinical_case_record(
         st.error("Suspected cases cannot be lower than confirmed cases.")
         return None
 
+    submitted_by = require_current_user_id()
+    if submitted_by is None:
+        return None
+
     record = {
         "report_date": report_date.isoformat(),
         "facility_name": facility_name,
@@ -917,7 +951,7 @@ def submit_clinical_case_record(
         "suspected_cases": int(suspected_cases) if suspected_cases is not None else None,
         "diagnostic_method": diagnostic_method or None,
         "patient_age_group": patient_age_group or None,
-        "submitted_by": get_current_user_id(),
+        "submitted_by": submitted_by,
         "notes": notes or None,
     }
 
