@@ -270,8 +270,14 @@ def render_reports_page():
                             st.write(f"Genus counts — An: {row.get('Anopheles',0)} Cx: {row.get('Culex',0)} Ae: {row.get('Aedes',0)}")
                             st.write(f"PCR status: {row.get('pcr_status', 'not_submitted')}")
                         with col_img:
-                            if row.get("_first_photo"):
-                                st.image(row["_first_photo"], width="stretch")
+                            # Must be a real URL string, not merely truthy. Under pandas 3
+                            # the applied column takes the new `str` dtype, and the None for
+                            # a photo-less row comes back out as float NaN — which is
+                            # truthy, so a plain `if` passed it straight to st.image() and
+                            # the page died with "'float' object has no attribute 'format'".
+                            photo = row.get("_first_photo")
+                            if isinstance(photo, str) and photo:
+                                st.image(photo, width="stretch")
                             else:
                                 st.caption("No photo for this entry.")
                             specimen_id = row.get("specimen_id")
