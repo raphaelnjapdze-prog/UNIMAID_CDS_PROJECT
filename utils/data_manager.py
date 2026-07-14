@@ -622,6 +622,44 @@ def build_collection_events(df: pd.DataFrame) -> tuple[list[dict], pd.DataFrame]
     return events, other_rows
 
 
+def specimens_ready_for_pcr(df: pd.DataFrame) -> pd.DataFrame:
+    """The specimens a PCR confirmation can be attached to: the identified ones.
+
+    A batch field log is not one — it is a bulk count of a night's catch, not an
+    individual, and there is no single mosquito for a PCR result to describe. A vialed
+    specimen nobody has identified yet is not one either: PCR confirms or overturns an
+    identification, so without one there is nothing to confirm.
+    """
+    if df is None or df.empty or "field_screening_result" not in df.columns:
+        return pd.DataFrame()
+
+    identified = df["field_screening_result"].apply(
+        lambda fs: _as_screening_dict(fs).get("screening_method") in IDENTIFICATION_METHODS
+    )
+    out = df[identified].copy()
+    if "collection_date" in out.columns:
+        out = out.sort_values("collection_date", ascending=False)
+    return out
+
+
+def pcr_specimen_label(row: dict) -> str:
+    """Human-readable option label for the PCR specimen picker.
+
+    A bare UUID tells lab staff nothing about which tube is in their hand, so lead with
+    the tube label and the identification.
+    """
+    screening = _as_screening_dict(row.get("field_screening_result"))
+    genus = extract_primary_genus(screening) or "undetermined"
+    tube = row.get("tube_label")
+    date = row.get("collection_date") or "undated"
+    short_id = str(row.get("specimen_id") or "")[:8]
+
+    parts = [tube] if tube else []
+    parts += [genus, str(date), f"{short_id}…"]
+    prefix = "✔ " if (row.get("pcr_status") == "confirmed") else ""
+    return prefix + " · ".join(parts)
+
+
 def is_pending_identification(record) -> bool:
     """True if a row is a vialed-out individual still awaiting its identification —
     i.e. a subsample whose genus is known from the pile it came from but which has

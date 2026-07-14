@@ -22,7 +22,14 @@ from qrcode.constants import ERROR_CORRECT_M
 from supabase import Client
 
 from utils.auth import get_supabase_client
-from utils.data_manager import clear_specimen_records_cache, first_row, response_rows
+from utils.data_manager import (
+    clear_specimen_records_cache,
+    first_row,
+    load_specimen_records,
+    pcr_specimen_label,
+    response_rows,
+    specimens_ready_for_pcr,
+)
 from utils.logging_config import get_logger
 from utils.morphology_keys import complex_membership_by_trigger
 
@@ -122,67 +129,120 @@ def fetch_specimen_by_id(client: Client, specimen_id: str) -> Optional[Dict[str,
     return first_row(response)
 
 
+_MANUAL_ENTRY = "Enter an ID manually / scan a QR…"
+_NOTHING_SELECTED = "— Select a specimen —"
+
+
+def _pcr_target_specimen_id() -> str:
+    """Which specimen the lab is confirming: picked from the list, or typed/scanned.
+
+    Lab staff hold a tube, not a UUID, so the list leads with the tube label and the
+    identification. Manual entry stays, for a QR scanned straight into the box.
+    """
+    candidates = specimens_ready_for_pcr(load_specimen_records())
+
+    if candidates.empty:
+        st.info(
+            "No identified specimens yet. PCR confirms or overturns an identification, so "
+            "identify a specimen on the Diagnostics page first — then it appears here."
+        )
+        return st.text_input(
+            "Specimen ID (QR value)", key="pcr_manual_id", placeholder="UUID or specimen ID"
+        ).strip()
+
+    labels = {pcr_specimen_label(row): row["specimen_id"] for row in candidates.to_dict("records")}
+
+    choice = st.selectbox(
+        "Identified specimen",
+        options=[_NOTHING_SELECTED, *labels.keys(), _MANUAL_ENTRY],
+        key="pcr_specimen_choice",
+        help="Vialed specimens that have been identified. ✔ marks one already PCR-confirmed.",
+    )
+
+    if choice == _MANUAL_ENTRY:
+        return st.text_input(
+            "Specimen ID (QR value)", key="pcr_manual_id", placeholder="UUID or specimen ID"
+        ).strip()
+    if choice == _NOTHING_SELECTED:
+        return ""
+    return str(labels[choice])
+
+
 def render_pcr_confirmation_form() -> None:
     """Render a Streamlit form for lab staff to look up and update a specimen record."""
     st.subheader("PCR Confirmation Entry")
-    st.caption("Scan or enter the specimen QR ID to link the physical specimen to its database record.")
+    st.caption("Pick the identified specimen, or scan its QR value, then record the PCR result.")
 
     client = get_supabase_client()
     if client is None:
         st.warning("Supabase is not configured. Set SUPABASE_URL and SUPABASE_ANON_KEY to enable database updates.")
         return
 
-    specimen_id_input = st.text_input("Specimen ID (QR value)", placeholder="UUID or specimen ID")
+    specimen_id = _pcr_target_specimen_id()
+    if not specimen_id:
+        return
 
-    if st.button("Look up specimen") and specimen_id_input:
-        record = fetch_specimen_by_id(client, specimen_id_input)
-        if record is None:
-            st.error("No specimen record found. Confirm the QR code value or create the record first.")
+    record = fetch_specimen_by_id(client, specimen_id)
+    if record is None:
+        st.error("No specimen record found. Confirm the QR code value or create the record first.")
+        return
+
+    # NOTE: everything below is rendered unconditionally, NOT inside `if st.button(...)`.
+    # It used to be: the form was only instantiated on the run where "Look up specimen" was
+    # clicked, so the rerun that a Submit click triggers re-evaluated that button as False,
+    # the form was never created, and the PCR result was silently discarded — the same bug
+    # that was fixed on the Diagnostics page.
+    detail_col, qr_col = st.columns([3, 1])
+    with detail_col:
+        with st.expander("Specimen record"):
+            st.json(record)
+    with qr_col:
+        st.markdown("**Specimen label**")
+        render_specimen_qr(record["specimen_id"], key="qr_pcr_lookup")
+
+    statuses = ["not_submitted", "pending", "confirmed"]
+    with st.form("pcr_confirmation_form"):
+        st.write("### PCR confirmation details")
+        pcr_status = st.selectbox(
+            "PCR status",
+            options=statuses,
+            index=statuses.index(record.get("pcr_status") or "not_submitted"),
+        )
+        pcr_confirmed_species = st.text_input(
+            "PCR-confirmed species",
+            value=record.get("pcr_confirmed_species") or "",
+            placeholder="e.g. Anopheles coluzzii",
+        )
+        pcr_lab_reference = st.text_input(
+            "Lab reference / batch ID",
+            value=record.get("pcr_lab_reference") or "",
+            placeholder="e.g. LAB-2026-001",
+        )
+        pcr_confirmed_date = st.date_input(
+            "PCR confirmed date",
+            value=_as_date(record.get("pcr_confirmed_date")),
+        )
+
+        submitted = st.form_submit_button("Submit PCR result", type="primary")
+
+    if submitted:
+        payload = {
+            "specimen_id": record["specimen_id"],
+            "pcr_status": pcr_status,
+            "pcr_confirmed_species": pcr_confirmed_species or None,
+            "pcr_lab_reference": pcr_lab_reference or None,
+            "pcr_confirmed_date": pcr_confirmed_date.isoformat() if pcr_confirmed_date else None,
+        }
+        try:
+            updated = upsert_specimen_record(client, payload)
+        except Exception as e:
+            logger.exception("PCR upsert failed for %s", record["specimen_id"])
+            st.error(f"The PCR result was not saved: {e}")
             return
 
-        st.success(f"Loaded specimen {record['specimen_id']}")
-
-        detail_col, qr_col = st.columns([3, 1])
-        with detail_col:
-            st.json(record)
-        with qr_col:
-            st.markdown("**Specimen label**")
-            render_specimen_qr(record["specimen_id"], key="qr_pcr_lookup")
-
-        with st.form("pcr_confirmation_form"):
-            st.write("### PCR confirmation details")
-            pcr_status = st.selectbox(
-                "PCR status",
-                options=["not_submitted", "pending", "confirmed"],
-                index=["not_submitted", "pending", "confirmed"].index(record.get("pcr_status") or "not_submitted"),
-            )
-            pcr_confirmed_species = st.text_input(
-                "PCR-confirmed species",
-                value=record.get("pcr_confirmed_species") or "",
-                placeholder="e.g. Anopheles coluzzii",
-            )
-            pcr_lab_reference = st.text_input(
-                "Lab reference / batch ID",
-                value=record.get("pcr_lab_reference") or "",
-                placeholder="e.g. LAB-2026-001",
-            )
-            pcr_confirmed_date = st.date_input(
-                "PCR confirmed date",
-                value=_as_date(record.get("pcr_confirmed_date")),
-            )
-
-            submitted = st.form_submit_button("Submit PCR result")
-            if submitted:
-                payload = {
-                    "specimen_id": record["specimen_id"],
-                    "pcr_status": pcr_status,
-                    "pcr_confirmed_species": pcr_confirmed_species or None,
-                    "pcr_lab_reference": pcr_lab_reference or None,
-                    "pcr_confirmed_date": pcr_confirmed_date.isoformat() if pcr_confirmed_date else None,
-                }
-                updated = upsert_specimen_record(client, payload)
-                st.success(f"PCR result saved for specimen {updated['specimen_id']}")
-                st.json(updated)
+        st.success(f"PCR result saved for specimen {updated['specimen_id']}")
+        with st.expander("Updated record"):
+            st.json(updated)
 
 
 def _extract_predicted_label(field_screening_result: Dict[str, Any]) -> Optional[str]:
