@@ -97,10 +97,12 @@ def main():
         render_login_page()
         return
 
-    # Add system title header
+    # One product, one name. This header read "National Integrated Vector Surveillance
+    # System" — a claim to be a national system that nothing supports, and a third name
+    # for the app after the login page's and the sidebar's.
     st.markdown("""
         <div style="text-align: center; padding: 10px 0px 5px 0px;">
-            <h2 style="color: #0369a1; margin: 0; font-weight: 700;">National Integrated Vector Surveillance System</h2>
+            <h2 style="color: #0369a1; margin: 0; font-weight: 700;">Vector Sentinel Engine</h2>
         </div>
     """, unsafe_allow_html=True)
 

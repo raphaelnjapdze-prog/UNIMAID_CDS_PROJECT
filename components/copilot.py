@@ -40,8 +40,8 @@ def get_live_copilot_response(user_query: str) -> str:
         config = types.GenerateContentConfig(
             tools=[search_tool],
             system_instruction=(
-                "You are a world-class WHO medical entomology expert and public health consultant "
-                "deployed at the UNIMAID Vector Sentinel Hub. Your goal is to provide elite field advice.\n\n"
+                "You are a medical entomology and public health advisor supporting a malaria "
+                "vector surveillance team. Give precise, field-usable advice.\n\n"
                 "CRITICAL INSTRUCTIONS:\n"
                 "- You have access to live Google Search. Always use it to verify current WHO, CDC, "
                 "and peer-reviewed journal entries (PubMed, standard vector databases) regarding "
@@ -57,7 +57,11 @@ def get_live_copilot_response(user_query: str) -> str:
             contents=user_query,
             config=config
         )
-        return response.text
+        # response.text is None when the model returns no candidate (e.g. a safety block).
+        # Returning it as-is would render "None" into the chat as if it were an answer.
+        return response.text or (
+            "The model returned no answer for that query. Try rephrasing it."
+        )
 
     except Exception as e:
         return f" Entomological Core Error: Failed to establish live uplink stream. Details: {str(e)}"

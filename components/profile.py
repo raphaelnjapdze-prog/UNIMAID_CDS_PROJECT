@@ -53,20 +53,22 @@ def load_profile_meta():
     except Exception:
         auth_name, auth_email = None, None
 
+    # Blank rather than pre-filled: a default institution or degree is a guess about the
+    # user, and one they may not notice before it ends up on an exported report.
     default_profile = {
-        "full_name": auth_name or "Investigator Name",
-        "headline": "Medical Entomologist & Vector Surveillance Field Lead",
-        "educational_level": "M.Sc.",
-        "school_attended": "University of Maiduguri",
-        "country": "Nigeria",
-        "state_province": "Borno State",
+        "full_name": auth_name or "",
+        "headline": "",
+        "educational_level": "",
+        "school_attended": "",
+        "country": "",
+        "state_province": "",
         "email": auth_email or "",
         "phone": "",
         "orcid_id": "",
         "linkedin_url": "",
         "bio": "",
         "biography": "",
-        "skills": ["Vector Taxonomy", "Larval Sampling", "Insecticide Resistance Bioassays"],
+        "skills": [],
     }
 
     row = load_profile(get_current_user_id())

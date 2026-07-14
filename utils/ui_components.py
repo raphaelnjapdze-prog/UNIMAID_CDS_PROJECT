@@ -81,15 +81,19 @@ def inject_global_dashboard_theme():
     st.markdown(custom_css, unsafe_allow_html=True)
 
 def render_institutional_sidebar_header():
-    """Renders clean, structured agency metadata at the top of the navigation pane."""
+    """Product identity at the top of the navigation pane.
+
+    Says the same thing as the login page. It previously read "VECTRA EDGE" — a product
+    name that appears nowhere else — over "UNIMAID Research Node Node-01", so the sidebar
+    and the login screen named two different systems.
+    """
     with st.sidebar:
         st.markdown(
             "<div style='margin-top: -1.5rem; padding-bottom: 0.5rem;'>"
-            "<h2 style='color: #2dd4bf !important; margin: 0; font-size: 1.4rem; border-none !important; border-bottom: none !important;'>🧬 VECTRA EDGE</h2>"
-            "<p style='font-size: 0.78rem; color: #94a3b8 !important; margin: 2px 0 0 0; line-height: 1.3;'>"
-            "National Integrated Vector Surveillance System<br>"
-            "<b>UNIMAID Research Node Node-01</b>"
-            "</p></div>",
+            "<h2 style='color: #2dd4bf !important; margin: 0; font-size: 1.3rem; "
+            "border-bottom: none !important;'>Vector Sentinel Engine</h2>"
+            "<p style='font-size: 0.78rem; color: #94a3b8 !important; margin: 3px 0 0 0; "
+            "line-height: 1.35;'>Malaria vector surveillance</p></div>",
             unsafe_allow_html=True
         )
         st.markdown("---")

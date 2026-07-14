@@ -112,7 +112,7 @@ def _render_brand_panel():
     st.markdown(
         """
         <div class="login-brand">
-          <div class="eyebrow">University of Maiduguri</div>
+          <div class="eyebrow">Vector Surveillance Platform</div>
           <h1>Vector Sentinel Engine</h1>
           <p class="lede">
             Malaria vector surveillance for endemic regions — field collection,

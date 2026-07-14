@@ -337,7 +337,7 @@ def render_dashboard_page():
         st.markdown(
             """
             <div style='color:#94A3B8; font-size:12.5px; line-height:1.5;'>
-                <b>Vector Sentinel Portal</b><br>
+                <b>Vector Sentinel Engine</b><br>
                 Specimen data is stored in the specimen_records table and is not
                 fabricated, sampled, or estimated for display purposes.
             </div>
