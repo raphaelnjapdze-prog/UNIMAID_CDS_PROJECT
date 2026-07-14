@@ -87,11 +87,11 @@ def pcr_app(monkeypatch):
     monkeypatch.setattr(pcr, "load_specimen_records", lambda: pd.DataFrame([record]))
     monkeypatch.setattr(pcr, "fetch_specimen_by_id", lambda _c, _i: dict(record))
 
-    def fake_upsert(_client, payload):
-        saved.append(payload)
-        return {**record, **payload}
+    def fake_update(_client, specimen_id, fields):
+        saved.append({"specimen_id": specimen_id, **fields})
+        return {**record, **fields}
 
-    monkeypatch.setattr(pcr, "upsert_specimen_record", fake_upsert)
+    monkeypatch.setattr(pcr, "update_specimen_pcr", fake_update)
     return saved
 
 
@@ -120,6 +120,36 @@ class TestSubmitSurvivesItsOwnRerun:
         assert pcr_app[0]["specimen_id"] == "vial-1"
         assert pcr_app[0]["pcr_status"] == "confirmed"
         assert pcr_app[0]["pcr_confirmed_species"] == "Anopheles coluzzii"
+
+    def test_only_pcr_columns_are_written(self, pcr_app):
+        """The write must be an UPDATE of the PCR columns, carrying nothing else.
+
+        It used to be an upsert (INSERT … ON CONFLICT DO UPDATE). Postgres validates the
+        proposed insert row against NOT NULL *before* it detects the conflict, so a payload
+        holding only the PCR columns was rejected outright:
+
+            null value in column "collection_date" ... violates not-null constraint
+
+        Confirming a PCR result must never create a specimen either: a mosquito nobody
+        collected cannot have a PCR result.
+        """
+        at = AppTest.from_function(_pcr_page, default_timeout=30)
+        at.run()
+        at.selectbox[0].select_index(1).run()
+        at.selectbox[1].set_value("confirmed").run()
+        at.button[0].click().run()
+
+        written = pcr_app[0]
+        assert set(written) == {
+            "specimen_id",            # the .eq() filter, not part of the payload
+            "pcr_status",
+            "pcr_confirmed_species",
+            "pcr_lab_reference",
+            "pcr_confirmed_date",
+        }
+        # Nothing about the collection event may be touched by a lab form.
+        for column in ("collection_date", "collector_id", "field_screening_result"):
+            assert column not in written
 
     def test_nothing_is_written_before_a_specimen_is_chosen(self, pcr_app):
         at = AppTest.from_function(_pcr_page, default_timeout=30)

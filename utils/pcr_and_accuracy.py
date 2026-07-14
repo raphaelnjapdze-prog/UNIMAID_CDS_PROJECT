@@ -106,14 +106,34 @@ def render_specimen_qr(
     )
 
 
-def upsert_specimen_record(client: Client, record: Dict[str, Any]) -> Dict[str, Any]:
-    """Insert or update a specimen record in Supabase."""
+def update_specimen_pcr(client: Client, specimen_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+    """Write PCR results onto an EXISTING specimen row.
+
+    An UPDATE, deliberately not an upsert. `upsert` is INSERT … ON CONFLICT DO UPDATE, and
+    Postgres checks the proposed insert row against the table's NOT NULL constraints
+    *before* it detects the conflict — so a payload carrying only the PCR columns was
+    rejected outright:
+
+        null value in column "collection_date" ... violates not-null constraint
+
+    The specimen already exists (the caller just fetched it). Confirming a PCR result must
+    never create a record anyway: a mosquito that was never collected cannot have a PCR
+    result, and inserting one here would fabricate a specimen out of a lab form.
+    """
     if client is None:
         raise RuntimeError("Supabase client is not available")
-    response = client.table("specimen_records").upsert(record, on_conflict="specimen_id").execute()
+
+    response = (
+        client.table("specimen_records").update(fields).eq("specimen_id", specimen_id).execute()
+    )
     row = first_row(response)
     if row is None:
-        raise RuntimeError("Failed to upsert specimen record")
+        # An UPDATE no RLS policy permits matches zero rows and raises nothing.
+        raise RuntimeError(
+            "The database accepted no change to that specimen — check that an UPDATE "
+            "policy exists on specimen_records, and that the specimen ID is correct."
+        )
+
     # The ledger this row belongs to is cached for 60s. Without this, a lab confirms a
     # species and the dashboard, accuracy report and specimen tables keep showing the
     # unconfirmed row back to them — looking like the confirmation was lost.
@@ -226,17 +246,18 @@ def render_pcr_confirmation_form() -> None:
         submitted = st.form_submit_button("Submit PCR result", type="primary")
 
     if submitted:
+        # Only the PCR columns. specimen_id identifies the row in the .eq() filter and is
+        # not part of the payload — nothing else about the specimen is touched.
         payload = {
-            "specimen_id": record["specimen_id"],
             "pcr_status": pcr_status,
             "pcr_confirmed_species": pcr_confirmed_species or None,
             "pcr_lab_reference": pcr_lab_reference or None,
             "pcr_confirmed_date": pcr_confirmed_date.isoformat() if pcr_confirmed_date else None,
         }
         try:
-            updated = upsert_specimen_record(client, payload)
+            updated = update_specimen_pcr(client, record["specimen_id"], payload)
         except Exception as e:
-            logger.exception("PCR upsert failed for %s", record["specimen_id"])
+            logger.exception("PCR update failed for %s", record["specimen_id"])
             st.error(f"The PCR result was not saved: {e}")
             return
 
