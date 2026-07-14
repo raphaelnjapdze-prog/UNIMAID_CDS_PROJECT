@@ -166,7 +166,9 @@ def _run_lightweight_enhancement(image: Any) -> Image.Image:
     width, height = pil_image.size
     if width < 1200 or height < 1200:
         new_size = (int(width * 2), int(height * 2))
-        up = pil_image.resize(new_size, resample=Image.LANCZOS)
+        # Image.Resampling.LANCZOS, not the legacy Image.LANCZOS alias: Pillow moved the
+        # filters onto the Resampling enum and intends to drop the module-level constants.
+        up = pil_image.resize(new_size, resample=Image.Resampling.LANCZOS)
     else:
         up = pil_image
 
