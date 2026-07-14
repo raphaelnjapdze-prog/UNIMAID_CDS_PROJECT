@@ -339,7 +339,7 @@ def render_multi_angle_capture_component() -> Optional[Dict[str, Any]]:
 
 
 def render_multi_angle_capture_page() -> None:
-    """Page entry point used by the app router (see app.py NAV_MAP)."""
+    """Page entry point used by the app router (see app.py PAGE_MODULES)."""
     render_multi_angle_capture_component()
 
 

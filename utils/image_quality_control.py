@@ -31,11 +31,9 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     cv2 = None
 
-
-try:
-    import torch  # type: ignore
-except Exception:  # pragma: no cover - optional dependency
-    torch = None
+# NOTE: do not import torch here. It was imported and never used — a dead import that
+# cost ~3.4s on every app start, because app.py pulls this module in transitively via
+# components/multi_angle_capture.py. The quality checks below are pure Pillow/numpy/cv2.
 
 
 def _coerce_image(image: Any) -> Image.Image:

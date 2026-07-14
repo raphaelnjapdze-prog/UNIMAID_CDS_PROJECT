@@ -2,6 +2,8 @@
 # APPLICATION ENTRYPOINT ORCHESTRATOR (app.py)
 # =========================================================================
 
+import importlib
+
 import streamlit as st
 
 from utils.auth import restore_session
@@ -34,25 +36,43 @@ from utils.ui_components import (
 # Execute additional structural layout themes
 apply_theme()
 
-# 4. Core Page Component Imports
-from components.bioassay_entry import render_bioassay_entry_page
-from components.clinical_case_entry import render_clinical_case_entry_page
-from components.copilot import render_copilot_page
-from components.correlation import render_correlation_page
-from components.dashboard import render_dashboard_page
-from components.diagnostics import render_diagnostics_page
-from components.environmental_trends import render_environmental_trends_page
-from components.forecasting import render_forecasting_page
-from components.lab_pcr import render_lab_pcr_page
+# 4. Page routing — pages are imported ON DEMAND, not up front.
+#
+# Importing all fifteen at startup dragged in every page's dependencies whether or not
+# the user ever opened that page: scikit-learn (1.6s, for the risk engine), google.genai
+# (1.0s, for the Copilot), folium, plotly. Cold start was ~9s, paid on every container
+# boot — and Streamlit Cloud reboots idle apps, so a field user waited it out.
+#
+# Each page now imports the first time it is opened and stays in sys.modules afterwards,
+# so a revisit costs nothing. Only the login page is imported eagerly: it is what an
+# unauthenticated visitor always renders.
 from components.login import render_login_page
-from components.multi_angle_capture import render_multi_angle_capture_page
-from components.predictions import render_predictions_page
-from components.profile import render_profile_page
-from components.reports import render_reports_page
-from components.retraining import render_retraining_page
-from components.site_log import render_site_log_page
 
-# ... (Keep your existing page configs and component imports completely identical)
+# page key (URL ?page=) -> "module:render function"
+PAGE_MODULES = {
+    "dashboard":   "components.dashboard:render_dashboard_page",
+    "log":         "components.site_log:render_site_log_page",
+    "ai":          "components.diagnostics:render_diagnostics_page",
+    "capture":     "components.multi_angle_capture:render_multi_angle_capture_page",
+    "trends":      "components.environmental_trends:render_environmental_trends_page",
+    "copilot":     "components.copilot:render_copilot_page",
+    "forecaster":  "components.forecasting:render_forecasting_page",
+    "risk":        "components.predictions:render_predictions_page",
+    "correlation": "components.correlation:render_correlation_page",
+    "lab":         "components.lab_pcr:render_lab_pcr_page",
+    "bioassay":    "components.bioassay_entry:render_bioassay_entry_page",
+    "case_entry":  "components.clinical_case_entry:render_clinical_case_entry_page",
+    "retraining":  "components.retraining:render_retraining_page",
+    "reports":     "components.reports:render_reports_page",
+    "profile":     "components.profile:render_profile_page",
+}
+
+
+def _render_page(page_key: str) -> None:
+    """Import the page's module on first use and render it."""
+    module_path, function_name = PAGE_MODULES[page_key].split(":")
+    module = importlib.import_module(module_path)
+    getattr(module, function_name)()
 
 # 5. Session State Initialization & Verified Session Restore
 if "authenticated" not in st.session_state:
@@ -70,24 +90,6 @@ if not st.session_state["authenticated"]:
 # returns early — still clears the cookie.
 sync_refresh_cookie(st.session_state.get("sb_refresh_token"))
 
-# Reverse mapping configuration linking URL keys directly to functional names
-NAV_MAP = {
-    "dashboard": "Surveillance Dashboard",
-    "log":       "Site Log Entry",
-    "ai":        "Advanced AI Diagnostics",
-    "capture":   "Multi-Angle Capture",
-    "trends":    "Global Change Trends",
-    "copilot":   "WHO Entomology AI Copilot",
-    "forecaster": "Historical Trends",
-    "risk": "Resistance Status Prediction",
-    "correlation": "Clinical Case Correlation",
-    "lab":       "PCR Lab Confirmation",
-    "bioassay":  "Bioassay Result Entry",
-    "case_entry": "Clinical Case Data Entry",
-    "retraining": "Local Retraining",
-    "reports":   "Automated Reports",
-    "profile":   "Investigator Profile",
-}
 def main():
     # Enforce strict authentication gate security boundary. A real Supabase login (or a
     # revalidated restore_session) is the only way past this — the old Guest Explorer flag
@@ -110,10 +112,8 @@ def main():
     url_params = st.query_params
     query_page = url_params.get("page", "dashboard")
 
-    if query_page not in NAV_MAP:
+    if query_page not in PAGE_MODULES:
         query_page = "dashboard"
-
-    current_active_page = NAV_MAP[query_page]
 
     # Render sidebar navigation
     render_sidebar_nav(query_page)
@@ -121,37 +121,7 @@ def main():
     # Render layout brand graphics and menus smoothly
     render_banner()
 
-    # 6. Core Architectural Layout Routing Switches (SPA Architecture Engine)
-    if current_active_page == "Surveillance Dashboard":
-        render_dashboard_page()
-    elif current_active_page == "Site Log Entry":
-        render_site_log_page()
-    elif current_active_page == "Advanced AI Diagnostics":
-        render_diagnostics_page()
-    elif current_active_page == "Multi-Angle Capture":
-        render_multi_angle_capture_page()
-    elif current_active_page == "Global Change Trends":
-        render_environmental_trends_page()
-    elif current_active_page == "WHO Entomology AI Copilot":
-        render_copilot_page()
-    elif current_active_page == "Historical Trends":
-        render_forecasting_page()
-    elif current_active_page == "Resistance Status Prediction":
-        render_predictions_page()
-    elif current_active_page == "Clinical Case Correlation":
-        render_correlation_page()
-    elif current_active_page == "PCR Lab Confirmation":
-        render_lab_pcr_page()
-    elif current_active_page == "Bioassay Result Entry":
-        render_bioassay_entry_page()
-    elif current_active_page == "Clinical Case Data Entry":
-        render_clinical_case_entry_page()
-    elif current_active_page == "Local Retraining":
-        render_retraining_page()
-    elif current_active_page == "Automated Reports":
-        render_reports_page()
-    elif current_active_page == "Investigator Profile":
-        render_profile_page()
+    _render_page(query_page)
 
     render_system_footer()
 
