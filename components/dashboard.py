@@ -20,6 +20,7 @@ from streamlit_folium import st_folium
 from utils.auth import get_supabase_client
 from utils.data_manager import (
     add_collector_column,
+    build_collection_events,
     extract_primary_genus,
     load_specimen_records,
 )
@@ -139,6 +140,90 @@ def _csv_safe(value: str) -> str:
     if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
         return "'" + text
     return text
+
+
+def _render_collection_events(df: pd.DataFrame) -> None:
+    """The ledger as collection events, with each vialed individual nested under its batch.
+
+    A flat ledger lists a vialed mosquito as an unrelated new specimen ID, which hides the
+    very relationship subsampling exists to record. Here each batch shows what was caught,
+    how much of it has been vialed out, and what remains in the bulk sample — and the
+    individuals sit underneath the catch they came from.
+    """
+    events, other_rows = build_collection_events(df)
+
+    if not events:
+        st.info("No batch collection events yet. Save a site log entry to create one.")
+    for event in events:
+        counts = event["genus_counts"]
+        summary = " · ".join(
+            f"{genus} {c['caught']}" for genus, c in counts.items() if c["caught"]
+        ) or "no counts recorded"
+        vialed_note = f" · {event['total_vialed']} vialed" if event["total_vialed"] else ""
+
+        header = (
+            f"{event['collection_date'] or 'undated'} — {event['breeding_site_type'] or 'site not recorded'}"
+            f"  ·  {summary}{vialed_note}"
+        )
+
+        with st.expander(header):
+            st.caption(
+                f"Collected by {event['collector']} · batch `{event['specimen_id'][:8]}…`"
+            )
+
+            if counts:
+                # caught = vialed + in_batch, always. Showing all three makes the
+                # no-double-count invariant visible rather than merely true.
+                breakdown = pd.DataFrame(
+                    [
+                        {
+                            "Genus": genus,
+                            "Caught": c["caught"],
+                            "Vialed out": c["vialed"],
+                            "Still in batch": c["in_batch"],
+                        }
+                        for genus, c in counts.items()
+                    ]
+                )
+                st.dataframe(breakdown, width="stretch", hide_index=True)
+
+            if event["field_notes"]:
+                st.caption(f"Notes: {event['field_notes']}")
+
+            children = event["children"]
+            if not children:
+                st.caption("No individuals vialed out of this batch yet.")
+            else:
+                st.markdown(f"**Vialed individuals ({len(children)})**")
+                child_table = pd.DataFrame(
+                    [
+                        {
+                            "Tube": c["tube_label"] or "—",
+                            "Specimen ID (QR)": c["specimen_id"],
+                            "Genus": c["genus"] or "—",
+                            "Identified as": c["identified_as"] or "Pending identification",
+                            "PCR": c["pcr_confirmed_species"] or (c["pcr_status"] or "not_submitted"),
+                        }
+                        for c in children
+                    ]
+                )
+                st.dataframe(child_table, width="stretch", hide_index=True)
+
+    # Identifications and captures that belong to no batch. Not dropped — a row that
+    # silently disappears from every view is worse than one shown out of context.
+    if other_rows is not None and not other_rows.empty:
+        with st.expander(f"Records not part of a collection event ({len(other_rows)})"):
+            st.caption(
+                "Standalone identifications and multi-angle captures — saved without being "
+                "vialed out of a batch field log."
+            )
+            standalone = add_collector_column(other_rows.drop(columns=["genus"], errors="ignore"))
+            cols = [
+                c
+                for c in ["Collector", "specimen_id", "collection_date", "screening_method", "pcr_status"]
+                if c in standalone.columns
+            ]
+            st.dataframe(standalone[cols] if cols else standalone, width="stretch", hide_index=True)
 
 
 def render_dashboard_page():
@@ -318,8 +403,18 @@ def render_dashboard_page():
                 )
         st.markdown("---")
 
-    # ── Full ledger ────────────────────────────────────────────────────────
-    with st.expander("View Complete Specimen Ledger"):
+    # ── Ledger ─────────────────────────────────────────────────────────────
+    st.subheader("Specimen Ledger")
+    events_tab, records_tab = st.tabs(["Collection events", "All records"])
+
+    with events_tab:
+        _render_collection_events(df)
+
+    with records_tab:
+        st.caption(
+            "Every row in specimen_records, including each vialed individual as its own "
+            "record. This is the raw ledger the counts are computed from."
+        )
         # Replace raw collector_id with the readable Collector, rather than showing both.
         # The raw column is a UUID (or the 'unattributed-legacy' sentinel) and identifies
         # nobody to a human reader; the resolved name is derived from it and says the same

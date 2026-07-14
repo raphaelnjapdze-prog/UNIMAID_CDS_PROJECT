@@ -499,6 +499,129 @@ def fetch_batch_children(batch_specimen_id: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _as_screening_dict(field_screening_result) -> dict:
+    """field_screening_result as a dict, whether it arrived as one or as a JSON string."""
+    if isinstance(field_screening_result, str):
+        try:
+            field_screening_result = json.loads(field_screening_result)
+        except Exception:
+            logger.debug("Could not JSON-decode field_screening_result", exc_info=True)
+            return {}
+    return field_screening_result if isinstance(field_screening_result, dict) else {}
+
+
+def summarise_vialed_child(row: dict) -> dict:
+    """One vialed-out individual, described for display under its parent batch."""
+    screening = _as_screening_dict(row.get("field_screening_result"))
+    method = screening.get("screening_method")
+
+    # The genus is known from the pile it was vialed out of, even before anyone identifies
+    # it. On a freshly vialed specimen it sits in the field_subsample result; once
+    # identified, attach_identification_to_specimen carries it forward as subsampled_genus.
+    if method == "field_subsample":
+        known_genus = (screening.get("result") or {}).get("genus")
+    else:
+        known_genus = screening.get("subsampled_genus")
+
+    # A specimen still tagged field_subsample has been vialed but not identified. Its genus
+    # is known from the pile it came from, which is why extract_primary_genus returns one
+    # (so it still counts toward that genus in aggregates) — but reporting that as an
+    # identification would claim work nobody has done. Only a real identification method
+    # counts as identified.
+    identified_as = None if method == "field_subsample" else extract_primary_genus(screening)
+
+    return {
+        "specimen_id": row.get("specimen_id"),
+        "tube_label": row.get("tube_label"),
+        "genus": known_genus,
+        "identified_as": identified_as,
+        "identified_by": screening.get("identified_by_label"),
+        "pcr_status": row.get("pcr_status"),
+        "pcr_confirmed_species": row.get("pcr_confirmed_species"),
+    }
+
+
+def build_collection_events(df: pd.DataFrame) -> tuple[list[dict], pd.DataFrame]:
+    """Reshape the flat ledger into collection events, each with its vialed individuals.
+
+    A batch field log is a collection event: 500 Anopheles caught at one place on one
+    night. Vialing an individual out of it creates a child row — which is what keeps the
+    counts honest — but a flat ledger then shows that mosquito as an unrelated new ID,
+    hiding the relationship it exists to record. This nests each child under the batch it
+    came from.
+
+    Per genus it reports three numbers that must always reconcile:
+        caught   — the raw field count, never mutated
+        vialed   — how many have been vialed out as individuals
+        in_batch — caught − vialed, what still sits in the bulk sample
+
+    Returns (events, other_rows). `other_rows` holds rows belonging to no collection
+    event — standalone identifications and multi-angle captures — so nothing is silently
+    dropped from view.
+    """
+    if df is None or df.empty:
+        return [], pd.DataFrame()
+
+    rows = df.to_dict("records")
+
+    children_by_parent: dict[str, list[dict]] = {}
+    for row in rows:
+        parent = row.get("parent_specimen_id")
+        if parent:
+            children_by_parent.setdefault(str(parent), []).append(row)
+
+    events: list[dict] = []
+    accounted: set[str] = set()
+
+    for row in rows:
+        screening = _as_screening_dict(row.get("field_screening_result"))
+        if screening.get("screening_method") != "manual_field_log":
+            continue
+
+        specimen_id = str(row.get("specimen_id"))
+        accounted.add(specimen_id)
+        result = screening.get("result") or {}
+        vialed_tally = result.get("vialed_out") or {}
+
+        genus_counts = {}
+        for genus, count_key in _FIELD_LOG_GENUS_KEYS.items():
+            caught = int(result.get(count_key, 0) or 0)
+            vialed = int(vialed_tally.get(genus, 0) or 0)
+            if caught or vialed:
+                genus_counts[genus] = {
+                    "caught": caught,
+                    "vialed": vialed,
+                    "in_batch": max(0, caught - vialed),
+                }
+
+        other_caught = int(result.get("other_genera_count", 0) or 0)
+        if other_caught:
+            # "Other" cannot be vialed out (only the three tracked genera can), so its
+            # whole count always remains in the batch.
+            genus_counts["Other"] = {"caught": other_caught, "vialed": 0, "in_batch": other_caught}
+
+        children = children_by_parent.get(specimen_id, [])
+        for child in children:
+            accounted.add(str(child.get("specimen_id")))
+
+        events.append({
+            "specimen_id": specimen_id,
+            "collection_date": row.get("collection_date"),
+            "breeding_site_type": row.get("breeding_site_type"),
+            "collector": extract_collector_display(row),
+            "field_notes": (result.get("field_notes") or "").strip(),
+            "genus_counts": genus_counts,
+            "total_caught": sum(c["caught"] for c in genus_counts.values()),
+            "total_vialed": sum(c["vialed"] for c in genus_counts.values()),
+            "children": [summarise_vialed_child(c) for c in children],
+        })
+
+    events.sort(key=lambda e: str(e["collection_date"] or ""), reverse=True)
+
+    other_rows = df[~df["specimen_id"].astype(str).isin(accounted)] if "specimen_id" in df.columns else pd.DataFrame()
+    return events, other_rows
+
+
 def is_pending_identification(record) -> bool:
     """True if a row is a vialed-out individual still awaiting its identification —
     i.e. a subsample whose genus is known from the pile it came from but which has
@@ -869,8 +992,12 @@ def extract_primary_genus(field_screening_result) -> str | None:
         return result.get("genus")
     if method == "manual_checklist":
         genus_triage = result.get("genus_triage")
-        if genus_triage:
+        # genus_triage is written as {"genus": ...}. It is JSONB, though, so a row shaped
+        # differently must not take the whole dashboard down with an AttributeError.
+        if isinstance(genus_triage, dict):
             return genus_triage.get("genus")
+        if isinstance(genus_triage, str) and genus_triage:
+            return genus_triage
         return result.get("genus") or result.get("resolved_genus")
     if method == "trained_classifier":
         return result.get("genus")
