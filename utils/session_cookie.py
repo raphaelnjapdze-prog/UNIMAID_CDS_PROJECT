@@ -14,12 +14,11 @@ server), which is the same posture supabase-js takes by default. It is written w
 SameSite=Lax, and with Secure whenever the page is served over https.
 
 Reading uses st.context.cookies, which sees the cookies the browser sent with the request.
-Writing goes through a tiny script in a components iframe: srcdoc iframes inherit the
-parent's origin, so a document.cookie write there lands on the app's own domain.
+Writing goes through a tiny script in a srcdoc iframe (st.iframe): srcdoc iframes inherit
+the parent's origin, so a document.cookie write there lands on the app's own domain.
 """
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from utils.logging_config import get_logger
 
@@ -48,7 +47,7 @@ def _emit_cookie_script(value: str, max_age: int) -> None:
     # json.dumps-style quoting is not enough here: the value is a JWT (dot-separated
     # base64url), so it carries no quotes or semicolons, but escape defensively anyway.
     safe = value.replace("\\", "\\\\").replace('"', '\\"')
-    components.html(
+    st.iframe(
         f"""
         <script>
           (function () {{
