@@ -57,7 +57,9 @@ def _emit_cookie_script(value: str, max_age: int) -> None:
           }})();
         </script>
         """,
-        height=0,
+        # The iframe only runs a script and shows nothing, but st.iframe rejects height=0
+        # (unlike the old components.html) — 1px is the smallest it allows and is invisible.
+        height=1,
     )
 
 
