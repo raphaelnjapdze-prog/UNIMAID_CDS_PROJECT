@@ -37,56 +37,80 @@ def render_sidebar_nav(active: str):
     empty state, which logged the user out on every tab click.
     """
     with st.sidebar:
-        # Left-align the labels and give every tab a sky-blue fill: inactive tabs
-        # get a light sky blue with bold near-black text; the active tab gets a
-        # deeper sky blue with white text so it still stands out. Color is forced
-        # on the button AND its inner nodes (label <p> + icon), because Streamlit
-        # nests the label in a child element that overrides a button-only color.
+        # Ghost navigation: inactive items are quiet (transparent, muted slate text)
+        # so the sidebar reads as one calm list; only the ACTIVE item is emphasized —
+        # a teal tint, a teal left-accent bar, and teal label/icon — matching the
+        # product's teal brand instead of the old sky-blue that clashed with it.
+        # Color is forced on the button AND its inner nodes (label <p> + icon), and
+        # -webkit-text-fill-color is set too because it overrides `color` on the
+        # rendered glyphs — `color` alone can leave the label its default shade.
         st.markdown(
             """
             <style>
-            /* Text/icon color — target the button and every descendant.
-               -webkit-text-fill-color is set too: it overrides `color` on the
-               rendered glyphs, so `color` alone can leave the label its default
-               (near-white) shade. */
+            /* Section eyebrow above the nav list. */
+            .vs-nav-eyebrow {
+                color: #64748b !important;
+                font-size: 0.7rem !important;
+                font-weight: 600 !important;
+                letter-spacing: 0.09em !important;
+                text-transform: uppercase !important;
+                margin: 0.35rem 0 0.6rem 0.15rem !important;
+            }
+
+            /* Inactive item (secondary button): quiet, transparent, muted text. */
             section[data-testid="stSidebar"] .stButton > button,
             section[data-testid="stSidebar"] .stButton > button * {
-                color: #111827 !important;
-                -webkit-text-fill-color: #111827 !important;
-                fill: #111827 !important;
+                color: #cbd5e1 !important;
+                -webkit-text-fill-color: #cbd5e1 !important;
+                fill: #cbd5e1 !important;
             }
-            /* Shape + fill on the button element only. */
             section[data-testid="stSidebar"] .stButton > button {
-                justify-content: flex-start;
-                font-weight: 700;
-                background-color: #87ceeb !important;
-                border-color: #6cb8dd !important;
+                justify-content: flex-start !important;
+                font-weight: 500 !important;
+                background-color: transparent !important;
+                border: 1px solid transparent !important;
+                border-radius: 8px !important;
+                box-shadow: none !important;
+                transition: background-color 0.15s ease, color 0.15s ease !important;
+            }
+            /* Streamlit centers the button's inner flex wrapper; left-align it so every
+               icon sits in the same gutter and labels start on a shared left edge. */
+            section[data-testid="stSidebar"] .stButton > button > div {
+                justify-content: flex-start !important;
+                width: 100% !important;
+            }
+            section[data-testid="stSidebar"] .stButton > button:hover,
+            section[data-testid="stSidebar"] .stButton > button:hover * {
+                color: #f1f5f9 !important;
+                -webkit-text-fill-color: #f1f5f9 !important;
+                fill: #f1f5f9 !important;
             }
             section[data-testid="stSidebar"] .stButton > button:hover {
-                background-color: #6cb8dd !important;
-                border-color: #4aa3cf !important;
+                background-color: rgba(148, 163, 184, 0.12) !important;
+                border-color: transparent !important;
             }
-            /* Active tab: deeper blue with white label + icon. */
+
+            /* Active item (primary button): teal tint + left accent bar + teal text. */
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"],
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] * {
-                color: #ffffff !important;
-                -webkit-text-fill-color: #ffffff !important;
-                fill: #ffffff !important;
+                color: #5eead4 !important;
+                -webkit-text-fill-color: #5eead4 !important;
+                fill: #5eead4 !important;
             }
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"] {
-                background-color: #0ea5e9 !important;
-                border-color: #0284c7 !important;
+                background-color: rgba(45, 212, 191, 0.14) !important;
+                border-color: transparent !important;
+                font-weight: 600 !important;
+                box-shadow: inset 3px 0 0 0 #2dd4bf !important;
             }
             section[data-testid="stSidebar"] .stButton > button[data-testid="stBaseButton-primary"]:hover {
-                background-color: #0284c7 !important;
-                border-color: #0284c7 !important;
+                background-color: rgba(45, 212, 191, 0.20) !important;
             }
             </style>
             """,
             unsafe_allow_html=True,
         )
-        st.markdown("Navigation")
-        st.markdown("---")
+        st.markdown("<p class='vs-nav-eyebrow'>Navigation</p>", unsafe_allow_html=True)
 
         for key, label, icon_name in _PAGES:
             is_active = key == active

@@ -114,11 +114,11 @@ def main():
     if query_page not in PAGE_MODULES:
         query_page = "dashboard"
 
+    # Brand header first so it sits at the TOP of the sidebar, above the nav.
+    render_banner()
+
     # Render sidebar navigation
     render_sidebar_nav(query_page)
-
-    # Render layout brand graphics and menus smoothly
-    render_banner()
 
     _render_page(query_page)
 
