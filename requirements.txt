@@ -33,6 +33,4 @@ qrcode==8.2
 python-dotenv==1.2.2
 
 # ── Excel export (components/reports.py) ─────────────────
-# Nothing else pulls this in: it is installed standalone on the dev machine, so the
-# Reports page works locally while a fresh deploy would fail to import it.
 openpyxl==3.1.5
