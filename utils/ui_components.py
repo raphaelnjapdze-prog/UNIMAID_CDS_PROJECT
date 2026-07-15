@@ -40,7 +40,7 @@ def inject_global_dashboard_theme():
         }
 
         /* High-Contrast Analytical Metric Cards */
-        [data-testid="stMetricBlock"] {
+        [data-testid="stMetric"] {
             background-color: #ffffff !important;
             border: 1px solid #e2e8f0 !important;
             border-left: 6px solid #0d9488 !important; /* Structural Teal Spine */
@@ -49,7 +49,7 @@ def inject_global_dashboard_theme():
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
             transition: transform 0.15s ease, box-shadow 0.15s ease !important;
         }
-        [data-testid="stMetricBlock"]:hover {
+        [data-testid="stMetric"]:hover {
             transform: translateY(-2px);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.08) !important;
         }

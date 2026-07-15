@@ -29,6 +29,36 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Teal accent — the one the metric-card spine, styled H2s, and active nav item use.
+_ACCENT = "#0d9488"
+
+
+def _section(title: str, caption: str | None = None) -> None:
+    """Consistent section header: a teal accent bar + title, with an optional caption.
+
+    Replaces the old st.subheader + horizontal-rule pattern, which chopped the page
+    into hard-lined bands. The accent bar and generous top margin give the sections
+    rhythm without a divider line between every block.
+    """
+    caption_html = (
+        f"<div style='color:#64748b; font-size:0.9rem; margin:4px 0 0 15px;'>{caption}</div>"
+        if caption
+        else ""
+    )
+    st.markdown(
+        f"""
+        <div style='margin:1.7rem 0 0.9rem 0;'>
+          <div style='display:flex; align-items:center; gap:11px;'>
+            <span style='width:4px; height:21px; background:{_ACCENT};
+                         border-radius:2px; display:inline-block;'></span>
+            <span style='font-size:1.18rem; font-weight:700; color:#0f172a;'>{title}</span>
+          </div>
+          {caption_html}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
 
 # ── Real data loading ─────────────────────────────────────────────────────
 def _load_specimen_records() -> pd.DataFrame:
@@ -272,8 +302,6 @@ def render_dashboard_page():
                     mime="text/csv", width="stretch",
                 )
 
-    st.markdown("---")
-
     if df.empty:
         st.info(
             "No specimen records found yet. Records appear here once field "
@@ -309,11 +337,11 @@ def render_dashboard_page():
         help="Specimens with a resolvable genus from their screening result.",
     )
 
-    st.markdown("---")
-
     # ── Map ───────────────────────────────────────────────────────────────
-    st.subheader("Geospatial Collection Map")
-    st.write("Real collection sites from specimen_records. Click a marker for screening details and photos.")
+    _section(
+        "Geospatial Collection Map",
+        "Real collection sites from specimen_records. Click a marker for screening details and photos.",
+    )
 
     map_data = df.dropna(subset=["gps_lat", "gps_lon"]).copy()
     if not map_data.empty:
@@ -356,13 +384,11 @@ def render_dashboard_page():
     else:
         st.info("No specimen records have GPS coordinates recorded yet.")
 
-    st.markdown("---")
-
     # ── Genus distribution + collection timeline ─────────────────────────
     graph_col1, graph_col2 = st.columns(2)
 
     with graph_col1:
-        st.subheader("Genus Distribution")
+        _section("Genus Distribution")
         genus_counts = df["genus"].dropna().value_counts()
         if not genus_counts.empty:
             st.bar_chart(genus_counts)
@@ -370,7 +396,7 @@ def render_dashboard_page():
             st.info("No specimens have a resolvable genus yet.")
 
     with graph_col2:
-        st.subheader("Collection Timeline")
+        _section("Collection Timeline")
         if "collection_date" in df.columns:
             timeline = df.copy()
             timeline["collection_date"] = pd.to_datetime(timeline["collection_date"], errors="coerce")
@@ -383,12 +409,10 @@ def render_dashboard_page():
         else:
             st.info("collection_date column not present in this dataset.")
 
-    st.markdown("---")
-
     # ── Photo evidence feed ───────────────────────────────────────────────
     has_photos = df["photo_urls"].apply(lambda x: isinstance(x, list) and len(x) > 0)
     if has_photos.any():
-        st.subheader("Recent Photo Evidence")
+        _section("Recent Photo Evidence")
         photo_df = df[has_photos].copy()
         if "collection_date" in photo_df.columns:
             photo_df = photo_df.sort_values(by="collection_date", ascending=False)
@@ -401,10 +425,9 @@ def render_dashboard_page():
                     caption=f"{row.get('breeding_site_type', 'Site')} ({row.get('collection_date', 'n/a')})",
                     width="stretch",
                 )
-        st.markdown("---")
 
     # ── Ledger ─────────────────────────────────────────────────────────────
-    st.subheader("Specimen Ledger")
+    _section("Specimen Ledger")
     events_tab, records_tab = st.tabs(["Collection events", "All records"])
 
     with events_tab:
