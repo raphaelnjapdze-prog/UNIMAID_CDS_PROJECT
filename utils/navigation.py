@@ -12,7 +12,6 @@ _PAGES = [
     ("dashboard", "Command Center", ":material/dashboard:"),
     ("log", "Site Log Entry", ":material/edit_note:"),
     ("ai", "AI Diagnostics", ":material/biotech:"),
-    ("capture", "Multi-Angle Capture", ":material/photo_camera:"),
     ("trends", "Change Trends", ":material/trending_up:"),
     ("copilot", "AI Copilot", ":material/smart_toy:"),
     ("forecaster", "Seasonal Forecast", ":material/calendar_month:"),

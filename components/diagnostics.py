@@ -9,6 +9,7 @@ members stay complex-level, never a forced single species guess.
 """
 
 import hashlib
+import uuid
 
 import pandas as pd
 import streamlit as st
@@ -19,7 +20,9 @@ from utils.data_manager import (
     extract_primary_genus,
     load_specimen_records,
     specimens_pending_identification,
+    upload_specimen_photo,
 )
+from utils.logging_config import get_logger
 from utils.morphology_keys import (
     ANOPHELES_KEY_ROOT,
     GENUS_TRIAGE_MATRIX,
@@ -34,6 +37,8 @@ from utils.morphology_keys import (
 )
 from utils.specimen_submission import submit_screening_result
 from utils.vision_inference import process_adult_image_inference, process_larval_image_inference
+
+logger = get_logger(__name__)
 
 _TIER_COLOR = {
     "Indicative — photo screening only": "#D97706",
@@ -469,6 +474,34 @@ def _render_anopheles_deep_key(target: str | None = None):
 _NEW_SPECIMEN = "— New specimen (create a new record) —"
 
 
+def _warn_if_poor_quality(uploaded) -> None:
+    """Flag a photo the model will struggle with, before it produces a confident wrong answer.
+
+    A blurry or badly exposed image does not make the vision model refuse — it makes it
+    guess, and the guess reads exactly like a good one. The checks are local and cheap
+    (blur, exposure, resolution), so run them and say so; the user may still screen the
+    image, because a poor photo of an unmistakable specimen can still be worth screening.
+    """
+    try:
+        from PIL import Image
+
+        from utils.image_quality_control import assess_image_quality
+
+        uploaded.seek(0)
+        report = assess_image_quality(Image.open(uploaded))
+    except Exception:
+        logger.debug("Image quality assessment failed; screening anyway", exc_info=True)
+        return
+    finally:
+        uploaded.seek(0)  # inference reads the stream from the start
+
+    if not report.get("passed"):
+        st.warning(
+            f"**Image quality:** {report.get('reason', 'below the usual threshold')} "
+            "The screening below may be unreliable — retake the photo if you can."
+        )
+
+
 def _screen_image_once(uploaded, cache_key: str, infer) -> dict:
     """Run vision inference once per uploaded image, reusing the result across reruns.
 
@@ -588,12 +621,17 @@ def _save_identification(
     result: dict,
     target: str | None,
     result_key: str | None = None,
+    photos: list | None = None,
 ) -> None:
     """Render the save button for an identification result and route the write.
 
     Routes to attach_identification_to_specimen when `target` is a linked vialed-out
     specimen (so it is updated, not duplicated), otherwise creates a new record. Never
     reports success it didn't get — a failed write shows an error.
+
+    `photos` are the images the identification was made from. They are uploaded to the
+    specimen-photos bucket and stored on the row: an identification whose evidence was
+    thrown away cannot be reviewed, and cannot be used to retrain anything.
 
     On success the scored result at `result_key` is dropped and the page reruns, so the
     panel resets. Without that, the (now working) button stays live on a result already
@@ -602,9 +640,16 @@ def _save_identification(
     if not st.button(label, key=key):
         return
 
+    photos = [p for p in (photos or []) if p is not None]
+
     if target:
+        # Photos are filed under the specimen they belong to, which already exists here.
+        photo_urls = [url for p in photos if (url := upload_specimen_photo(p, str(target)))]
         saved = attach_identification_to_specimen(
-            specimen_id=target, screening_method=screening_method, result=result
+            specimen_id=target,
+            screening_method=screening_method,
+            result=result,
+            photo_urls=photo_urls,
         )
         # attach_identification_to_specimen surfaces its own error on every failure path.
         if not saved:
@@ -617,7 +662,20 @@ def _save_identification(
             f"cleared, so the next result will not overwrite it."
         )
     else:
-        saved = submit_screening_result(screening_method=screening_method, result=result)
+        # The row does not exist yet, so fix its ID up front: the images are filed under
+        # that ID in storage and must land on the row that ends up carrying them.
+        new_specimen_id = str(uuid.uuid4()) if photos else None
+        photo_urls = (
+            [url for p in photos if (url := upload_specimen_photo(p, new_specimen_id))]
+            if new_specimen_id
+            else []
+        )
+        saved = submit_screening_result(
+            screening_method=screening_method,
+            result=result,
+            photo_urls=photo_urls,
+            specimen_id=new_specimen_id,
+        )
         # submit_screening_result surfaces its own error on every failure path (not
         # configured, not signed in, insert rejected) — a generic message here would
         # paper over the specific reason it just showed the user.
@@ -628,6 +686,134 @@ def _save_identification(
     if result_key:
         st.session_state.pop(result_key, None)
     st.rerun()
+
+
+# The views a mosquito's diagnostic features are actually visible from. Each is optional:
+# a specimen photographed only dorsally still gets screened on what that view shows.
+_ADULT_ANGLES = [
+    ("dorsal", "Dorsal", "From above — scutum pattern and thoracic ornamentation"),
+    ("lateral", "Lateral", "Side profile — palps, proboscis, abdomen"),
+    ("wings", "Wings", "Wing scales and vein pattern"),
+    ("legs", "Legs / tarsi", "Banding on the hind tarsi"),
+]
+
+
+def _render_single_photo_screening(target: str | None) -> None:
+    col1, col2 = st.columns([4, 5])
+
+    with col1:
+        st.markdown("#### Upload Adult Specimen Photo")
+        st.caption("Best results: lateral view, good lighting, in-focus palps/legs/wings.")
+        uploaded_adult = st.file_uploader(
+            "Adult image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="adult_img_uploader"
+        )
+        if uploaded_adult:
+            st.image(uploaded_adult, caption="Uploaded specimen", width="stretch")
+
+    with col2:
+        st.markdown("#### AI Screening Result")
+        if uploaded_adult:
+            _warn_if_poor_quality(uploaded_adult)
+            result = _screen_image_once(
+                uploaded_adult, "vision_adult_cache", process_adult_image_inference
+            )
+            _render_vision_result(result, is_larval=False)
+
+            if "error" not in result:
+                st.markdown("---")
+                _save_identification(
+                    "💾 Save this AI screening result",
+                    "save_vision_adult",
+                    "ai_vision",
+                    result,
+                    target,
+                    photos=[uploaded_adult],
+                )
+        else:
+            st.info("Upload a photo to run AI-assisted screening.")
+
+
+def _render_multi_angle_screening(target: str | None) -> None:
+    """Screen several views of one specimen, one AI call per angle.
+
+    The angles are screened SEPARATELY and every result is shown. They are not blended
+    into a single verdict: the model reads one image at a time, and inventing a consensus
+    across four independent guesses would be a claim the model never made. Where the
+    angles disagree, that disagreement is itself the finding — it usually means the
+    features are not clearly visible — and the user decides which view they trust.
+    """
+    st.caption(
+        "Upload the views you have of **one specimen**. Each is screened on its own; "
+        "you choose which result to record, and every image is stored with the record."
+    )
+
+    upload_col, result_col = st.columns([4, 5])
+
+    uploads: dict[str, object] = {}
+    with upload_col:
+        st.markdown("#### Upload Angles")
+        for angle_key, title, hint in _ADULT_ANGLES:
+            uploaded = st.file_uploader(
+                title, type=["jpg", "jpeg", "png"], key=f"adult_angle_{angle_key}", help=hint
+            )
+            if uploaded:
+                uploads[angle_key] = uploaded
+                st.image(uploaded, caption=title, width=180)
+
+    with result_col:
+        st.markdown("#### AI Screening Results")
+        if not uploads:
+            st.info("Upload at least one angle to run AI-assisted screening.")
+            return
+
+        results: dict[str, dict] = {}
+        for angle_key, title, _ in _ADULT_ANGLES:
+            uploaded = uploads.get(angle_key)
+            if uploaded is None:
+                continue
+            _warn_if_poor_quality(uploaded)
+            result = _screen_image_once(
+                uploaded, f"vision_adult_{angle_key}_cache", process_adult_image_inference
+            )
+            with st.expander(f"{title} — {result.get('resolved_name') or 'no result'}", expanded=True):
+                _render_vision_result(result, is_larval=False)
+            if "error" not in result:
+                results[angle_key] = result
+
+        if not results:
+            st.warning("No angle produced a usable screening result.")
+            return
+
+        st.markdown("---")
+        titles = {key: title for key, title, _ in _ADULT_ANGLES}
+        chosen_angle = st.selectbox(
+            "Which view's result do you want to record?",
+            options=list(results.keys()),
+            format_func=lambda k: f"{titles[k]} — {results[k].get('resolved_name') or 'undetermined'}",
+            key="adult_angle_choice",
+            help=(
+                "One identification is saved for this specimen. Pick the view whose "
+                "diagnostic features you actually trust; all uploaded images are stored "
+                "with it either way."
+            ),
+        )
+
+        distinct = {r.get("resolved_name") for r in results.values()}
+        if len(distinct) > 1:
+            st.warning(
+                "The angles disagree on this specimen. That usually means the diagnostic "
+                "features are not clearly visible — treat the identification with caution, "
+                "and prefer PCR confirmation."
+            )
+
+        _save_identification(
+            "💾 Save this AI screening result",
+            "save_vision_adult_multi",
+            "ai_vision",
+            results[chosen_angle],
+            target,
+            photos=list(uploads.values()),
+        )
 
 
 def render_diagnostics_page(active_df: pd.DataFrame | None = None):
@@ -748,37 +934,22 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                     st.info("Set traits on the left and click **Resolve**.")
 
         else:
-            col1, col2 = st.columns([4, 5])
+            photo_mode = st.radio(
+                "Photos to screen",
+                options=["Single photo", "Multiple angles"],
+                horizontal=True,
+                key="adult_photo_mode",
+                help=(
+                    "One image is often enough for genus. Multiple angles help when the "
+                    "diagnostic feature — scutum pattern, wing scales, tarsal banding — "
+                    "isn't visible from a single view."
+                ),
+            )
 
-            with col1:
-                st.markdown("#### Upload Adult Specimen Photo")
-                st.caption("Best results: lateral view, good lighting, in-focus palps/legs/wings.")
-                uploaded_adult = st.file_uploader(
-                    "Adult image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="adult_img_uploader"
-                )
-                if uploaded_adult:
-                    st.image(uploaded_adult, caption="Uploaded specimen", width="stretch")
-
-            with col2:
-                st.markdown("#### AI Screening Result")
-                if uploaded_adult:
-                    result = _screen_image_once(
-                        uploaded_adult, "vision_adult_cache", process_adult_image_inference
-                    )
-                    _render_vision_result(result, is_larval=False)
-
-                    # ── Save this AI screening result ──────────────────
-                    if "error" not in result:
-                        st.markdown("---")
-                        _save_identification(
-                            "💾 Save this AI screening result",
-                            "save_vision_adult",
-                            "ai_vision",
-                            result,
-                            target,
-                        )
-                else:
-                    st.info("Upload a photo to run AI-assisted screening.")
+            if photo_mode == "Single photo":
+                _render_single_photo_screening(target)
+            else:
+                _render_multi_angle_screening(target)
 
     # ── TAB 2: LARVAL ─────────────────────────────────────────────────────
     with tab2:

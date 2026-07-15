@@ -53,7 +53,6 @@ PAGE_MODULES = {
     "dashboard":   "components.dashboard:render_dashboard_page",
     "log":         "components.site_log:render_site_log_page",
     "ai":          "components.diagnostics:render_diagnostics_page",
-    "capture":     "components.multi_angle_capture:render_multi_angle_capture_page",
     "trends":      "components.environmental_trends:render_environmental_trends_page",
     "copilot":     "components.copilot:render_copilot_page",
     "forecaster":  "components.forecasting:render_forecasting_page",

@@ -30,6 +30,7 @@ def submit_screening_result(
     gps_lon: float | None = None,
     breeding_site_type: str | None = None,
     photo_urls: list | None = None,
+    specimen_id: str | None = None,
 ) -> dict | None:
     """
     Writes one specimen_records row. Returns the inserted row on success, None on
@@ -39,6 +40,10 @@ def submit_screening_result(
     `collector_id` defaults to the signed-in user. It is a parameter only so a caller
     can attribute a record to someone else; leaving it off must never produce an
     unattributed row, which is what it used to do.
+
+    `specimen_id` lets a caller fix the ID up front, which it must do when photos are
+    uploaded to storage before the row exists — the images are filed under that ID, so it
+    has to be the same one the row ends up with.
     """
     if screening_method not in IDENTIFICATION_METHODS:
         raise ValueError(f"screening_method must be one of {IDENTIFICATION_METHODS}")
@@ -69,6 +74,8 @@ def submit_screening_result(
         "field_screening_result": field_screening_result,
         "pcr_status":             "not_submitted",
     }
+    if specimen_id:
+        record["specimen_id"] = specimen_id
 
     try:
         response = client.table("specimen_records").insert(record).execute()
