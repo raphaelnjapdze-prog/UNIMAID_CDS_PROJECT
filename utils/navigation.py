@@ -26,6 +26,53 @@ _PAGES = [
 ]
 
 
+def _retract_sidebar_if_overlaying():
+    """Close the sidebar after a nav choice, but only when it is covering the page.
+
+    Below ~768px Streamlit renders the sidebar as a 300px overlay pinned at x=0 rather
+    than as a column beside the content, so on a 390px field phone a chosen page opens
+    almost entirely hidden behind the nav that opened it. Streamlit exposes no API to
+    collapse the sidebar, so we click its own collapse control.
+
+    The test is geometric rather than a hardcoded breakpoint: retract only if the sidebar
+    actually overlaps the main area. On a desktop the two sit side by side, nothing
+    overlaps, and the nav is left alone — collapsing it there would just hide a nav the
+    user has room for.
+
+    The script runs in a srcdoc iframe (Streamlit strips <script> from st.markdown). The
+    iframe sandbox grants allow-same-origin, so the parent document is reachable. It
+    retries briefly because the iframe can execute before Streamlit has finished
+    re-rendering the sidebar.
+    """
+    st.iframe(
+        """
+        <script>
+          (function () {
+            var tries = 0;
+            function attempt() {
+              tries++;
+              var doc;
+              try { doc = window.parent.document; } catch (e) { return; }
+              var sb = doc.querySelector("[data-testid='stSidebar']");
+              var main = doc.querySelector("[data-testid='stMain']");
+              var btn = doc.querySelector("[data-testid='stSidebarCollapseButton'] button")
+                     || doc.querySelector("[data-testid='stSidebarCollapseButton']");
+              if (!sb || !main || !btn) {
+                if (tries < 15) setTimeout(attempt, 100);
+                return;
+              }
+              if (sb.getAttribute('aria-expanded') !== 'true') return;
+              var s = sb.getBoundingClientRect(), m = main.getBoundingClientRect();
+              if (s.width > 0 && s.right > m.left + 1) btn.click();
+            }
+            attempt();
+          })();
+        </script>
+        """,
+        height=1,
+    )
+
+
 def render_sidebar_nav(active: str):
     """
     Sidebar navigation.
@@ -36,6 +83,11 @@ def render_sidebar_nav(active: str):
     trigger a browser navigation that spins up a fresh Streamlit session with
     empty state, which logged the user out on every tab click.
     """
+    # Set on the click below, honoured here on the rerun that follows — by which point
+    # the newly chosen page is on screen and the nav can get out of its way.
+    if st.session_state.pop("_nav_retract_pending", False):
+        _retract_sidebar_if_overlaying()
+
     with st.sidebar:
         # Ghost navigation: inactive items are quiet (transparent, muted slate text)
         # so the sidebar reads as one calm list; only the ACTIVE item is emphasized —
@@ -122,5 +174,6 @@ def render_sidebar_nav(active: str):
                 type="primary" if is_active else "secondary",
             )
             if clicked and not is_active:
+                st.session_state["_nav_retract_pending"] = True
                 st.query_params["page"] = key
                 st.rerun()
