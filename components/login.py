@@ -219,6 +219,10 @@ def _render_sign_in():
                         st.rerun()
                     else:
                         st.error("Incorrect email or password.")
+                except ConnectionError as e:
+                    # The auth server was unreachable (e.g. DNS/getaddrinfo failure) — a
+                    # network problem, not a wrong password. Say so plainly.
+                    st.warning(str(e))
                 except Exception as e:
                     st.error(f"Could not sign you in: {e}")
 
@@ -266,6 +270,8 @@ def _render_register():
                             "Check your inbox to confirm your email address, then sign in. "
                             "If you already have an account, sign in instead."
                         )
+                except ConnectionError as e:
+                    st.warning(str(e))
                 except Exception as e:
                     st.error(f"Could not create your account: {e}")
 

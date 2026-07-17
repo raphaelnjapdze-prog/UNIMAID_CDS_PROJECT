@@ -1,6 +1,10 @@
 # =========================================================================
 # AUTHENTICATION & DATABASE CORE UTILITIES (utils/auth.py)
 # =========================================================================
+import base64
+import json
+import socket
+import time
 from datetime import datetime
 
 import streamlit as st
@@ -13,9 +17,85 @@ from utils.config import (
     get_service_supabase_client,
 )
 from utils.logging_config import get_logger
-from utils.session_cookie import read_refresh_token
+from utils.session_cookie import read_refresh_token, sync_refresh_cookie
 
 logger = get_logger(__name__)
+
+# Refresh the access token this many seconds BEFORE it actually expires. A save that
+# starts just under the wire must not land after the token has died, and the refresh
+# round-trip itself takes time — so we renew with a margin rather than at the last second.
+_TOKEN_REFRESH_SKEW_SECONDS = 120
+
+
+def _jwt_exp(token: str):
+    """Read the `exp` (expiry, unix seconds) claim out of a JWT without verifying it.
+
+    We only need to know *when* to refresh, not to trust the token's contents — Supabase
+    verifies it server-side on every request. Returns None if the claim can't be read,
+    which callers treat as "leave the token alone".
+    """
+    try:
+        payload_b64 = token.split(".")[1]
+        payload_b64 += "=" * (-len(payload_b64) % 4)  # restore base64url padding
+        payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+        exp = payload.get("exp")
+        return int(exp) if exp is not None else None
+    except Exception:
+        logger.debug("Could not decode JWT exp claim", exc_info=True)
+        return None
+
+
+def _current_access_token():
+    """The user's access token, refreshed in place if it has expired or is about to.
+
+    Supabase access tokens (JWTs) live ~1 hour. get_supabase_client() re-applies this
+    token on every call, so a user working a long shift without reloading the page would
+    otherwise hit expired-JWT errors on saves once that hour is up. When the token is
+    within _TOKEN_REFRESH_SKEW_SECONDS of expiry we trade the (rotating) refresh token
+    for a fresh pair, persist both, and keep the reload cookie in step — exactly what
+    restore_session() does on reload, just triggered by the clock instead of a reload.
+    """
+    token = st.session_state.get("sb_access_token")
+    if not token:
+        return None
+
+    exp = _jwt_exp(token)
+    # Still comfortably valid, or we couldn't read the expiry — use it as-is. If it turns
+    # out to be dead, the request that uses it surfaces the error rather than us guessing.
+    if exp is None or exp - time.time() > _TOKEN_REFRESH_SKEW_SECONDS:
+        return token
+
+    refresh_token = st.session_state.get("sb_refresh_token")
+    client = get_base_supabase_client()
+    if not refresh_token or client is None:
+        return token
+
+    try:
+        auth_response = client.auth.refresh_session(refresh_token)
+    except Exception:
+        # Network hiccup or a revoked refresh token. Don't tear down the session here —
+        # return the (stale) token and let the actual request decide; a genuinely dead
+        # session gets cleaned up by restore_session on the next reload.
+        logger.warning("Proactive access-token refresh failed; using existing token", exc_info=True)
+        return token
+
+    session = getattr(auth_response, "session", None)
+    if session is None:
+        return token
+
+    new_access = getattr(session, "access_token", None)
+    new_refresh = getattr(session, "refresh_token", None)
+    if new_access:
+        st.session_state["sb_access_token"] = new_access
+    if new_refresh:
+        st.session_state["sb_refresh_token"] = new_refresh
+        # Supabase rotated the refresh token; push the new one into the reload cookie now
+        # so a browser reload before the next app run doesn't hand back a revoked token.
+        sync_refresh_cookie(new_refresh)
+
+    logger.debug("Access token refreshed ahead of expiry")
+    return st.session_state.get("sb_access_token")
+
 
 def get_supabase_client():
     """
@@ -25,11 +105,14 @@ def get_supabase_client():
     lives in st.session_state (persistent across reruns) — each time the
     client is fetched. This is what ensures every DB/storage request
     actually carries the logged-in user's credentials.
+
+    The token is renewed here if it has expired (or is about to), so a long
+    uninterrupted session never starts failing saves with an expired JWT.
     """
     client = get_base_supabase_client()
     if client is None:
         return None
-    token = st.session_state.get("sb_access_token")
+    token = _current_access_token()
     if token:
         try:
             client.postgrest.auth(token)
@@ -37,6 +120,31 @@ def get_supabase_client():
         except Exception:
             logger.debug("Failed to re-apply auth token to Supabase client", exc_info=True)
     return client
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    """True if `exc` (or anything in its cause/context chain) is a connectivity failure.
+
+    A DNS/connection failure and a rejected password are completely different problems,
+    but the SDK surfaces the first as a chained OSError/socket.gaierror wrapped by httpx.
+    `[Errno 11001] getaddrinfo failed` is the Windows form: DNS could not be resolved,
+    typically no internet. We must not report that to the user as a wrong password.
+    """
+    seen = set()
+    current = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (socket.gaierror, ConnectionError, TimeoutError)):
+            return True
+        if isinstance(current, OSError):
+            return True
+        name = type(current).__name__.lower()
+        if any(tag in name for tag in ("connect", "timeout", "network", "dns")):
+            return True
+        if "getaddrinfo" in str(current).lower():
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def get_supabase_service_client():
@@ -82,7 +190,19 @@ def sign_in_user(email: str, password: str):
         try:
             auth_response = client.auth.sign_in_with_password({"email": email, "password": password})
         except Exception as e:
-            st.error(f"Sign-in failed: {e}")
+            # A connectivity failure is not a credential failure. Returning None here would
+            # make the login page tell the user their password was wrong when the real
+            # problem is that the auth server was unreachable — so raise a clear,
+            # retry-able error and let the login view present it as a network issue.
+            if _is_network_error(e):
+                logger.warning("Sign-in could not reach the auth server", exc_info=True)
+                raise ConnectionError(
+                    "Can't reach the sign-in server. Check your internet connection "
+                    "and try again."
+                ) from e
+            # A genuine rejection (wrong email/password) — the login view shows its own
+            # "Incorrect email or password" message for the None return.
+            logger.info("Sign-in rejected", exc_info=True)
             return None
 
         session = getattr(auth_response, "session", None)
@@ -121,11 +241,22 @@ def sign_in_user(email: str, password: str):
 def sign_up_user(email: str, password: str, full_name: str):
     client = get_base_supabase_client()
     if client:
-        return client.auth.sign_up({
-            "email": email,
-            "password": password,
-            "options": {"data": {"full_name": full_name}},
-        })
+        try:
+            return client.auth.sign_up({
+                "email": email,
+                "password": password,
+                "options": {"data": {"full_name": full_name}},
+            })
+        except Exception as e:
+            # Same connectivity guard as sign-in: surface an unreachable auth server as a
+            # network problem rather than letting the raw "getaddrinfo failed" reach the UI.
+            if _is_network_error(e):
+                logger.warning("Sign-up could not reach the auth server", exc_info=True)
+                raise ConnectionError(
+                    "Can't reach the sign-up server. Check your internet connection "
+                    "and try again."
+                ) from e
+            raise
     return None
 
 
