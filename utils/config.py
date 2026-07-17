@@ -7,7 +7,7 @@ import streamlit as st
 from dotenv import load_dotenv
 
 # Clean imports from the modern SDK
-from supabase import create_client
+from supabase import ClientOptions, create_client
 
 from utils.logging_config import get_logger
 
@@ -42,6 +42,22 @@ SUPABASE_SERVICE_ENABLED = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 _supabase_client = None
 _supabase_service_client = None
 
+# The anon client is a module-level singleton shared by every browser session, and
+# utils.auth.get_supabase_client() re-applies the caller's own access token on every
+# use — the client is deliberately treated as holding no session of its own.
+#
+# auto_refresh_token (SDK default: True) breaks exactly that assumption. Saving a session
+# arms a background timer thread that refreshes whatever session the client last stored.
+# Supabase ROTATES the refresh token on every refresh and revokes the previous one —
+# including the copy sitting in the user's browser cookie — while handing the replacement
+# only to the client's own memory, where nothing ever reads it. So roughly an hour after
+# login the cookie's token is silently dead, and the next browser reload cannot restore
+# the session: the field user lands back on the login screen mid-shift.
+#
+# Refreshing is restore_session()'s job, and it passes the token explicitly.
+# Pinned by tests/test_session_persistence.py::TestClientDoesNotRotateTokensBehindOurBack.
+_CLIENT_OPTIONS = ClientOptions(auto_refresh_token=False)
+
 
 def get_base_supabase_client():
     """Anon Supabase client, created once on first use. None if not configured."""
@@ -49,7 +65,7 @@ def get_base_supabase_client():
     if not SUPABASE_ENABLED:
         return None
     if _supabase_client is None:
-        _supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+        _supabase_client = create_client(SUPABASE_URL, SUPABASE_ANON_KEY, options=_CLIENT_OPTIONS)
     return _supabase_client
 
 

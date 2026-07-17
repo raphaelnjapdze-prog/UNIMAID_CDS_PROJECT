@@ -51,7 +51,14 @@ def _emit_cookie_script(value: str, max_age: int) -> None:
         f"""
         <script>
           (function () {{
-            var secure = window.location.protocol === 'https:' ? '; Secure' : '';
+            // This script runs inside a srcdoc iframe, whose own location.protocol is
+            // "about:" — never the page's scheme. Checking it here therefore never
+            // matched 'https:', so Secure was silently left off on every deployment.
+            // Read the host page's scheme instead; the iframe sandbox grants
+            // allow-same-origin, so the parent is reachable.
+            var proto = '';
+            try {{ proto = window.parent.location.protocol; }} catch (e) {{ proto = ''; }}
+            var secure = proto === 'https:' ? '; Secure' : '';
             document.cookie = "{COOKIE_NAME}=" + "{safe}"
               + "; Path=/; Max-Age={max_age}; SameSite=Lax" + secure;
           }})();
