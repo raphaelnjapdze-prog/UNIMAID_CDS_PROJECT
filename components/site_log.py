@@ -19,9 +19,11 @@ from utils.data_manager import (
     fetch_batch_children,
     load_specimen_records,
     submit_site_log_entry,
+    sync_pending_writes,
     vial_out_specimens,
 )
 from utils.icons import render_page_header
+from utils.offline_queue import pending_count
 from utils.pcr_and_accuracy import render_specimen_qr
 
 _SUBSAMPLE_GENERA = ["Anopheles", "Culex", "Aedes"]
@@ -55,6 +57,41 @@ def _validate(anoph, culex, aedes, other, lat, lon, has_gps) -> str | None:
     return None
 
 
+def _render_offline_banner():
+    """Show and drain the offline queue.
+
+    When entries are waiting, try once to sync them automatically (a cheap no-op if
+    still offline — drain stops at the first failure), then show what remains with a
+    manual retry. Nothing renders when the queue is empty, so an online user never
+    sees it.
+    """
+    if pending_count() == 0:
+        return
+
+    # Best-effort automatic sync on load — the common case is that connectivity has
+    # come back by the time the user returns to this page.
+    synced, remaining = sync_pending_writes()
+    if synced:
+        clear_specimen_records_cache()
+        st.success(f"Synced {synced} entr{'y' if synced == 1 else 'ies'} that were saved offline.")
+
+    if remaining:
+        st.warning(
+            f"📥 {remaining} entr{'y' if remaining == 1 else 'ies'} saved on this device but "
+            "not yet uploaded — they'll sync automatically when you're back online. "
+            "They survive a reload; don't clear your browser data until they've synced."
+        )
+        if st.button("Sync now", key="offline_sync_now"):
+            with st.spinner("Syncing…"):
+                s2, r2 = sync_pending_writes()
+            if s2:
+                clear_specimen_records_cache()
+                st.success(f"Synced {s2} entr{'y' if s2 == 1 else 'ies'}.")
+            if r2:
+                st.error(f"{r2} still not synced — you're likely still offline. Try again shortly.")
+            st.rerun()
+
+
 def render_site_log_page():
     render_page_header("Site Log Entry", "log")
     st.caption(
@@ -62,6 +99,8 @@ def render_site_log_page():
         "optional photo. Saved immediately to specimen_records; no upload "
         "step, no intermediate file."
     )
+
+    _render_offline_banner()
 
     # GPS toggle lives OUTSIDE the form so its conditional fields can
     # actually appear before submission — st.form doesn't rerun on
@@ -144,13 +183,21 @@ def render_site_log_page():
     # take its own download with it. It clears on the next submit.
     saved = st.session_state.get("site_log_saved")
     if saved:
-        st.success(f"Saved. Specimen ID: {saved['specimen_id']}")
+        if saved.get("_pending_offline"):
+            st.warning(
+                f"Saved on this device — will upload automatically when you're back "
+                f"online. Specimen ID: {saved['specimen_id']}"
+            )
+        else:
+            st.success(f"Saved. Specimen ID: {saved['specimen_id']}")
         st.caption("Print this QR label and attach it to the physical specimen so the lab can link it to PCR results.")
         label_col, photo_col = st.columns(2)
         with label_col:
             render_specimen_qr(saved["specimen_id"], key="qr_sitelog_save")
         with photo_col:
-            if saved.get("photo_urls"):
+            if saved.get("_pending_offline"):
+                st.caption("Photo can't be uploaded offline — re-attach it once this entry has synced.")
+            elif saved.get("photo_urls"):
                 st.image(saved["photo_urls"][0], caption="Uploaded photo", width=200)
             else:
                 st.caption("No photo was attached to this entry.")

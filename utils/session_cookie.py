@@ -26,6 +26,11 @@ logger = get_logger(__name__)
 
 COOKIE_NAME = "vs_refresh_token"
 
+# Mirrors utils/offline_queue's pending field-writes so they survive a full reload /
+# idle-reboot, the same way the refresh token does. Holds no credential — just
+# queued form payloads the user already entered — so it needs no server validation.
+PENDING_QUEUE_COOKIE = "vs_pending_queue"
+
 # A week: long enough that a field worker isn't retyping a password every day, short enough
 # that a stolen cookie stops working reasonably soon. Supabase rotates the token on every
 # refresh, so an active user's cookie is replaced well before this expires.
@@ -43,7 +48,7 @@ def read_refresh_token() -> str | None:
     return token or None
 
 
-def _emit_cookie_script(value: str, max_age: int) -> None:
+def _emit_cookie_script(value: str, max_age: int, name: str = COOKIE_NAME) -> None:
     # json.dumps-style quoting is not enough here: the value is a JWT (dot-separated
     # base64url), so it carries no quotes or semicolons, but escape defensively anyway.
     safe = value.replace("\\", "\\\\").replace('"', '\\"')
@@ -59,7 +64,7 @@ def _emit_cookie_script(value: str, max_age: int) -> None:
             var proto = '';
             try {{ proto = window.parent.location.protocol; }} catch (e) {{ proto = ''; }}
             var secure = proto === 'https:' ? '; Secure' : '';
-            document.cookie = "{COOKIE_NAME}=" + "{safe}"
+            document.cookie = "{name}=" + "{safe}"
               + "; Path=/; Max-Age={max_age}; SameSite=Lax" + secure;
           }})();
         </script>
@@ -97,3 +102,27 @@ def sync_refresh_cookie(token: str | None) -> None:
     elif last_written:
         clear_refresh_token()
         st.session_state["_refresh_cookie_written"] = None
+
+
+# --- Offline pending-queue cookie (mirrors utils/offline_queue) --------------
+def read_pending_queue() -> str | None:
+    """The encoded pending-write queue the browser sent with this request, if any."""
+    try:
+        cookies = st.context.cookies or {}
+    except Exception:
+        logger.debug("st.context.cookies unavailable for pending queue", exc_info=True)
+        return None
+    return cookies.get(PENDING_QUEUE_COOKIE) or None
+
+
+def write_pending_queue(value: str) -> None:
+    """Persist (or clear, when value is empty) the encoded pending-write queue.
+
+    Only emits the cookie script when the value actually changed, so a rerun that
+    didn't touch the queue doesn't inject a fresh iframe every interaction.
+    """
+    last = st.session_state.get("_pending_queue_written")
+    if value == last:
+        return
+    _emit_cookie_script(value, MAX_AGE_SECONDS if value else 0, name=PENDING_QUEUE_COOKIE)
+    st.session_state["_pending_queue_written"] = value
