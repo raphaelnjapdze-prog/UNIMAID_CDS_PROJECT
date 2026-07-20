@@ -43,6 +43,10 @@ logger = get_logger(__name__)
 
 # One session-state key holds the live queue; the cookie mirrors it for reloads.
 _QUEUE_STATE_KEY = "offline_pending_queue"
+# Entries the server permanently rejected. Session-only (not cookie-mirrored): they
+# will never sync, so spending the tight cookie budget on them would starve entries
+# that still can. The UI must surface them immediately so the data isn't lost quietly.
+_QUARANTINE_STATE_KEY = "offline_rejected_entries"
 # Set once per session after we've read the cookie, so a reload hydrates the queue
 # exactly once rather than clobbering in-session additions on every rerun.
 _HYDRATED_KEY = "offline_queue_hydrated"
@@ -53,6 +57,14 @@ MAX_PENDING = 6
 # Encoded (base64) budget, well under the ~4 KB cookie limit to leave room for the
 # cookie's own attributes. add_entry refuses an addition that would exceed this.
 _MAX_ENCODED_BYTES = 3600
+
+# What a sync_fn tells drain about one entry. The three cases are genuinely different
+# and collapsing them is what wedges a queue: a transient failure must keep its entry
+# (and stop the drain, since the rest will fail too), while a permanent rejection must
+# release the queue head or everything behind it is stuck forever.
+SYNC_OK = "ok"            # confirmed written; drop the entry
+SYNC_RETRY = "retry"      # transient (offline); keep it and stop the drain
+SYNC_REJECTED = "rejected"  # server refused it; it will never sync — quarantine it
 
 
 # ---------------------------------------------------------------------------
@@ -155,27 +167,65 @@ def enqueue_site_log(record: dict) -> bool:
     return accepted
 
 
-def drain(sync_fn) -> tuple[int, int]:
-    """Try to sync every queued entry via sync_fn(kind, payload) -> bool.
+def drain(sync_fn) -> tuple[int, int, int]:
+    """Try to sync every queued entry via sync_fn(kind, payload) -> (status, detail).
 
-    Removes each entry that syncs successfully; leaves the rest queued (e.g. still
-    offline) for the next attempt. Returns (synced, remaining). sync_fn must return
-    truthy only on a confirmed write so we never drop an entry that didn't land.
+    status is SYNC_OK (drop it), SYNC_RETRY (transient — keep it and stop), or
+    SYNC_REJECTED (permanent — move it to quarantine so it stops blocking the queue).
+    detail is an optional message recorded with a quarantined entry.
+
+    Returns (synced, remaining, rejected). sync_fn must report SYNC_OK only on a
+    confirmed write, so we never drop an entry that didn't land.
     """
     queue = get_queue()
+    quarantined = get_quarantine()
     synced = 0
+    rejected = 0
+
     for entry in list(queue):
         try:
-            ok = sync_fn(entry.get("kind"), entry.get("payload"))
-        except Exception:
+            status, detail = _normalize_result(sync_fn(entry.get("kind"), entry.get("payload")))
+        except Exception as e:
+            # An unexpected raise is ambiguous, so take the conservative branch and
+            # keep the entry: a bug in sync_fn must not silently discard field data.
             logger.warning("Sync of a queued entry raised; leaving it queued", exc_info=True)
-            ok = False
-        if ok:
+            status, detail = SYNC_RETRY, str(e)
+
+        if status == SYNC_OK:
             queue = remove_entry(queue, entry["id"])
             synced += 1
+        elif status == SYNC_REJECTED:
+            # The server refused this payload — retrying can only fail identically, and
+            # leaving it at the head would block every entry behind it forever. Set it
+            # aside so the rest can drain; the UI surfaces it for export.
+            logger.warning("Queued entry %s permanently rejected: %s", entry.get("id"), detail)
+            queue = remove_entry(queue, entry["id"])
+            quarantined = [*quarantined, {**entry, "error": detail}]
+            rejected += 1
         else:
-            # Stop at the first failure: if we're offline again, the rest will fail
-            # too, and retrying them just burns time and duplicates error noise.
+            # Transient: if we're offline, the rest will fail too, and retrying them
+            # just burns time and duplicates error noise.
             break
+
     persist_queue(queue)
-    return synced, len(queue)
+    st.session_state[_QUARANTINE_STATE_KEY] = quarantined
+    return synced, len(queue), rejected
+
+
+def _normalize_result(result) -> tuple[str, str]:
+    """Accept either a (status, detail) pair or a bare status from sync_fn."""
+    if isinstance(result, tuple):
+        status, detail = result
+        return status, str(detail or "")
+    return result, ""
+
+
+def get_quarantine() -> list:
+    """Entries the server permanently rejected, for the UI to surface and export."""
+    return st.session_state.get(_QUARANTINE_STATE_KEY, [])
+
+
+def clear_quarantine() -> None:
+    """Drop the quarantined entries — call only once the user has exported or
+    re-entered them, since this is the last copy."""
+    st.session_state[_QUARANTINE_STATE_KEY] = []

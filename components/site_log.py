@@ -7,6 +7,7 @@ fabricated success states: a save either genuinely succeeds (confirmed by
 the returned row) or shows a real error.
 """
 
+import json
 from datetime import date
 
 import pandas as pd
@@ -23,7 +24,7 @@ from utils.data_manager import (
     vial_out_specimens,
 )
 from utils.icons import render_page_header
-from utils.offline_queue import pending_count
+from utils.offline_queue import clear_quarantine, get_quarantine, pending_count
 from utils.pcr_and_accuracy import render_specimen_qr
 
 _SUBSAMPLE_GENERA = ["Anopheles", "Culex", "Aedes"]
@@ -57,39 +58,82 @@ def _validate(anoph, culex, aedes, other, lat, lon, has_gps) -> str | None:
     return None
 
 
+def _plural(n: int) -> str:
+    return f"{n} entr{'y' if n == 1 else 'ies'}"
+
+
+def _render_rejected_entries():
+    """Surface entries the server permanently refused.
+
+    These will never sync, so the honest thing is to say so plainly and hand the user
+    their data back rather than leave it cycling in a queue that claims it's 'waiting
+    to upload'. The download is the last copy — clearing is a deliberate second step.
+    """
+    rejected = get_quarantine()
+    if not rejected:
+        return
+
+    st.error(
+        f"⚠️ {_plural(len(rejected))} could not be uploaded and will not sync — the "
+        "server refused the data. Download them below and re-enter or report them; "
+        "they are not saved anywhere else."
+    )
+    for entry in rejected:
+        payload = entry.get("payload", {})
+        with st.expander(f"Rejected: {payload.get('specimen_id', 'unknown specimen')}"):
+            st.caption(f"Queued at {entry.get('queued_at', 'unknown time')}")
+            st.code(entry.get("error") or "No error detail recorded.", language=None)
+            st.json(payload)
+
+    st.download_button(
+        "Download rejected entries (JSON)",
+        data=json.dumps(rejected, indent=2, default=str),
+        file_name="rejected_field_entries.json",
+        mime="application/json",
+        key="offline_rejected_download",
+    )
+    if st.button("Discard rejected entries", key="offline_rejected_clear"):
+        clear_quarantine()
+        st.rerun()
+
+
 def _render_offline_banner():
     """Show and drain the offline queue.
 
     When entries are waiting, try once to sync them automatically (a cheap no-op if
-    still offline — drain stops at the first failure), then show what remains with a
-    manual retry. Nothing renders when the queue is empty, so an online user never
-    sees it.
+    still offline — drain stops at the first transient failure), then show what remains
+    with a manual retry. Nothing renders when there's nothing pending or rejected, so an
+    online user never sees it.
     """
-    if pending_count() == 0:
+    if pending_count() == 0 and not get_quarantine():
         return
 
     # Best-effort automatic sync on load — the common case is that connectivity has
     # come back by the time the user returns to this page.
-    synced, remaining = sync_pending_writes()
+    # The rejected count is not read here — _render_rejected_entries reads the
+    # quarantine itself, so it also shows entries rejected on an earlier rerun.
+    synced, remaining, _ = sync_pending_writes()
     if synced:
         clear_specimen_records_cache()
-        st.success(f"Synced {synced} entr{'y' if synced == 1 else 'ies'} that were saved offline.")
+        st.success(f"Synced {_plural(synced)} that were saved offline.")
 
     if remaining:
         st.warning(
-            f"📥 {remaining} entr{'y' if remaining == 1 else 'ies'} saved on this device but "
-            "not yet uploaded — they'll sync automatically when you're back online. "
-            "They survive a reload; don't clear your browser data until they've synced."
+            f"📥 {_plural(remaining)} saved on this device but not yet uploaded — "
+            "they'll sync automatically when you're back online. They survive a reload; "
+            "don't clear your browser data until they've synced."
         )
         if st.button("Sync now", key="offline_sync_now"):
             with st.spinner("Syncing…"):
-                s2, r2 = sync_pending_writes()
+                s2, r2, _ = sync_pending_writes()
             if s2:
                 clear_specimen_records_cache()
-                st.success(f"Synced {s2} entr{'y' if s2 == 1 else 'ies'}.")
+                st.success(f"Synced {_plural(s2)}.")
             if r2:
                 st.error(f"{r2} still not synced — you're likely still offline. Try again shortly.")
             st.rerun()
+
+    _render_rejected_entries()
 
 
 def render_site_log_page():

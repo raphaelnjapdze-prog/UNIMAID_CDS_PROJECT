@@ -36,7 +36,13 @@ from utils.auth import (
     is_network_error,
 )
 from utils.logging_config import get_logger
-from utils.offline_queue import drain, enqueue_site_log
+from utils.offline_queue import (
+    SYNC_OK,
+    SYNC_REJECTED,
+    SYNC_RETRY,
+    drain,
+    enqueue_site_log,
+)
 
 logger = get_logger(__name__)
 
@@ -261,29 +267,37 @@ def insert_specimen_record(record: dict, client=None) -> dict | None:
     return first_row(response)
 
 
-def sync_pending_writes() -> tuple[int, int]:
-    """Drain the offline queue back to Supabase. Returns (synced, remaining).
+def sync_pending_writes() -> tuple[int, int, int]:
+    """Drain the offline queue back to Supabase. Returns (synced, remaining, rejected).
 
     On a successful drain of anything, the specimen cache is cleared so the newly
     landed rows appear.
     """
 
-    def _sync(kind: str, payload: dict) -> bool:
+    def _sync(kind: str, payload: dict):
         if kind != "site_log":
-            logger.warning("Unknown queued write kind %r; leaving it queued", kind)
-            return False
-        # An insert that doesn't raise landed, even when it returns no row: under RLS
-        # the anon key can be denied SELECT on what it just wrote. Requiring a row back
-        # would re-queue a write that succeeded and insert it again on the next drain —
-        # double-counting the exact catch this queue exists to protect. Only a raised
-        # exception (which drain catches) means "didn't land, keep it queued".
-        insert_specimen_record(payload)
-        return True
+            # Not transient — nothing will teach this build how to write that kind.
+            return SYNC_REJECTED, f"Unknown queued write kind {kind!r}"
+        try:
+            # An insert that doesn't raise landed, even when it returns no row: under
+            # RLS the anon key can be denied SELECT on what it just wrote. Requiring a
+            # row back would re-queue a write that succeeded and insert it again on the
+            # next drain — double-counting the exact catch this queue exists to protect.
+            insert_specimen_record(payload)
+            return SYNC_OK, ""
+        except Exception as e:
+            if is_network_error(e):
+                return SYNC_RETRY, str(e)
+            # A schema or permission rejection will fail identically on every retry.
+            # Entries are only queued after a *network* failure, so the payload was
+            # never server-validated — live-schema drift can surface here first.
+            logger.exception("Queued site-log entry was rejected by the server")
+            return SYNC_REJECTED, str(e)
 
-    synced, remaining = drain(_sync)
+    synced, remaining, rejected = drain(_sync)
     if synced:
         clear_specimen_records_cache()
-    return synced, remaining
+    return synced, remaining, rejected
 
 
 _FIELD_LOG_GENUS_KEYS = {
