@@ -15,12 +15,21 @@ import pandas as pd
 import streamlit as st
 
 from utils.ai_advisory import generate_ai_intervention_response
+from utils.classifier_inference import classifier_status, process_adult_image_classification
 from utils.data_manager import (
     attach_identification_to_specimen,
     extract_primary_genus,
     load_specimen_records,
     specimens_pending_identification,
     upload_specimen_photo,
+)
+from utils.ecological_context import (
+    complex_for_taxon,
+    habitat_options,
+    region_options,
+)
+from utils.ecological_context import (
+    estimate as estimate_ecological_probability,
 )
 from utils.logging_config import get_logger
 from utils.morphology_keys import (
@@ -411,15 +420,19 @@ def _render_anopheles_deep_key(target: str | None = None):
                 _render_anopheles_identification(res)
 
                 if res.get("resolution_level") not in ("undetermined", "genus"):
+                    eco = _render_ecological_estimate(res.get("taxon"), "anoph_char")
+                    saved = {
+                        "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
+                        "anopheles_deep_key": res,
+                    }
+                    if eco:
+                        saved["ecological_estimate"] = eco
                     st.markdown("---")
                     _save_identification(
                         "💾 Save this Anopheles result",
                         "save_anoph_char",
                         "manual_checklist",
-                        {
-                            "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
-                            "anopheles_deep_key": res,
-                        },
+                        saved,
                         target,
                         result_key="anoph_char_result",
                     )
@@ -451,14 +464,15 @@ def _render_anopheles_deep_key(target: str | None = None):
     terminal = st.session_state["anoph_key_terminal"]
     if terminal:
         _render_key_terminal(terminal)
+        eco = _render_ecological_estimate(terminal.get("taxon"), "anoph_key")
+        saved = {"genus_triage": {"genus": "Anopheles"}, "anopheles_couplet_key": terminal}
+        if eco:
+            saved["ecological_estimate"] = eco
         _save_identification(
             "💾 Save this key result",
             "save_anoph_key",
             "manual_checklist",
-            {
-                "genus_triage": {"genus": "Anopheles"},
-                "anopheles_couplet_key": terminal,
-            },
+            saved,
             target,
         )
         st.info("Click **↺ Restart key** to identify another specimen.")
@@ -878,17 +892,209 @@ def _render_single_photo_screening(target: str | None) -> None:
             _render_vision_result(result, is_larval=False)
 
             if "error" not in result:
+                eco = _render_ecological_estimate(result.get("best_match"), "vision_adult")
+                save_result = dict(result)
+                if eco:
+                    save_result["ecological_estimate"] = eco
                 st.markdown("---")
                 _save_identification(
                     "💾 Save this AI screening result",
                     "save_vision_adult",
                     "ai_vision",
-                    result,
+                    save_result,
                     target,
                     photos=[uploaded_adult],
                 )
         else:
             st.info("Upload a photo to run AI-assisted screening.")
+
+
+def _render_classifier_result(result: dict) -> None:
+    """Render a trained-classifier verdict: resolved taxon, confidence, and the
+    resolution-level badge that keeps a cryptic complex from reading as a species."""
+    if "error" in result:
+        st.error(result["error"])
+        return
+
+    resolution = result.get("resolution_level", "genus")
+    color, tier_label = _RESOLUTION_STYLE.get(resolution, ("#64748B", resolution))
+
+    conf = result.get("confidence")
+    badges = ""
+    if conf is not None:
+        badges += _badge(f"Confidence: {conf * 100:.0f}%", "#0369A1")
+    badges += _badge(tier_label, color)
+    if result.get("molecular_id_required"):
+        badges += _badge("PCR confirmation required", "#D97706")
+    if result.get("stage2_uncertain"):
+        badges += _badge("Stage-2 uncertain → genus", "#64748B")
+
+    taxon = result.get("predicted_species") or result.get("genus") or "Undetermined"
+    inner = "".join(p for p in [
+        '<div style="font-size:13px; color:#64748B; font-weight:600;">Predicted Taxon</div>',
+        f'<div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{taxon}</div>',
+        f'<div style="margin:2px 0 6px;">{badges}</div>',
+    ] if p)
+    st.markdown(
+        f'<div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px; '
+        f'background:white; margin-bottom:14px;">{inner}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "🤖 Two-stage EfficientNet-B0 classifier (models/). Stage-2 output classes are "
+        "constrained so cryptic complexes (*An. gambiae* complex, *An. funestus* group) "
+        "resolve only to the complex/group — never a bare member. PCR still splits them."
+    )
+
+
+_MONTHS = {
+    "Unknown": 0, "January": 1, "February": 2, "March": 3, "April": 4, "May": 5,
+    "June": 6, "July": 7, "August": 8, "September": 9, "October": 10,
+    "November": 11, "December": 12,
+}
+
+
+def _pretty_member(name: str) -> str:
+    """Prettify an estimator member epithet for display (gambiae_ss -> gambiae s.s.)."""
+    return name.replace("_ss", " s.s.").replace("_", " ")
+
+
+def _render_ecological_estimate(taxon: str | None, key_prefix: str) -> dict | None:
+    """Optional ecological-context panel for a COMPLEX-level ``taxon``.
+
+    Shared by every path that can produce a cryptic complex — the trained
+    classifier, the Anopheles character scorer and couplet key, and AI vision.
+    Returns the computed estimate dict (so a caller can fold it into a saved
+    record), or None when it doesn't apply or hasn't been run. Purely advisory:
+    it estimates the likely complex *member* from where/when the specimen was
+    collected and NEVER changes the complex verdict — PCR is still the only
+    definitive split. Renders nothing for species/genus taxa or complexes the
+    estimator has no rules for.
+    """
+    complex_name = complex_for_taxon(taxon)
+    if not complex_name:
+        return None
+
+    state_key = f"{key_prefix}_eco_estimate"
+    with st.expander("🌍 Ecological context estimate (optional — not an identification)"):
+        st.caption(
+            "Estimate which complex member is most likely from where/when the specimen was "
+            "collected. Guides field sampling and specimen prioritisation; PCR is still the "
+            "only way to confirm the species."
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            region = st.selectbox(
+                "Region / country", ["Unknown"] + region_options(), key=f"{key_prefix}_eco_region"
+            )
+        with c2:
+            habitat_labels = [h.replace("_", " ") for h in habitat_options()]
+            habitat = st.selectbox(
+                "Breeding site", ["Unknown"] + habitat_labels, key=f"{key_prefix}_eco_habitat"
+            )
+        with c3:
+            month_name = st.selectbox("Collection month", list(_MONTHS), key=f"{key_prefix}_eco_month")
+
+        if st.button("Estimate likely species", key=f"{key_prefix}_eco_run"):
+            est = estimate_ecological_probability(
+                complex_name,
+                region=None if region == "Unknown" else region,
+                habitat="unknown" if habitat == "Unknown" else habitat.replace(" ", "_"),
+                month=_MONTHS[month_name],
+            )
+            st.session_state[state_key] = {"complex": complex_name, "estimate": est}
+
+        stored = st.session_state.get(state_key)
+        if not stored or stored["complex"] != complex_name:
+            return None
+
+        est = stored["estimate"]
+        if "error" in est:
+            st.info(est["error"])
+            return None
+
+        dist = est.get("probability_distribution", {})
+        if dist:
+            top = _pretty_member(next(iter(dist)))
+            st.markdown(f"**Most likely member of {complex_name}:** {top}")
+            for sp, prob in dist.items():
+                st.markdown(
+                    f'<div style="font-size:13px; color:#0F172A; margin-bottom:2px;">'
+                    f'{_pretty_member(sp)} — <strong>{prob * 100:.0f}%</strong></div>',
+                    unsafe_allow_html=True,
+                )
+                st.progress(min(1.0, max(0.0, float(prob))))
+            with st.expander("Why these numbers?"):
+                for sp, why in est.get("reasoning", {}).items():
+                    st.caption(f"**{_pretty_member(sp)}** — {why}")
+        st.warning(est.get("disclaimer", ""))
+        return est
+
+
+def _render_classifier_screening(target: str | None) -> None:
+    """Trained-classifier screening: honest about availability, never fabricates.
+
+    When torch or the .pth checkpoints are missing, this shows setup guidance
+    instead of a dead button — the classifier is optional and separate from the
+    deployed app (see models/README_CLASSIFIER_SETUP.md)."""
+    st.markdown("#### Trained Classifier (two-stage CNN)")
+    st.caption(
+        "EfficientNet-B0 genus → species/complex pipeline. Optional and separate from "
+        "the deployed app; enable it by installing the ML extras and training the model."
+    )
+
+    status = classifier_status()
+    if not status["available"]:
+        st.warning(status["reason"])
+        st.caption("See **models/README_CLASSIFIER_SETUP.md** to train and place the checkpoints.")
+        return
+
+    missing = status.get("stage2_missing") or []
+    if missing:
+        st.info(
+            "Species-stage checkpoints are missing for: " + ", ".join(missing) +
+            " — specimens of those genera resolve to genus level only."
+        )
+
+    col1, col2 = st.columns([4, 5])
+    with col1:
+        st.markdown("#### Upload Adult Specimen Photo")
+        st.caption("Best results: lateral view, good lighting, in-focus palps/legs/wings.")
+        uploaded = st.file_uploader(
+            "Adult image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="clf_img_uploader"
+        )
+        if uploaded:
+            st.image(uploaded, caption="Uploaded specimen", width="stretch")
+
+    with col2:
+        st.markdown("#### Classifier Result")
+        if uploaded:
+            _warn_if_poor_quality(uploaded)
+            result = _screen_image_once(
+                uploaded, "clf_adult_cache", process_adult_image_classification
+            )
+            _render_classifier_result(result)
+
+            if "error" not in result:
+                # Complex-level results can carry an optional ecological estimate of
+                # the likely member; it's stored as provenance and never alters the
+                # complex verdict (predicted_species / resolution_level are untouched).
+                eco = _render_ecological_estimate(result.get("predicted_species"), "clf")
+                save_result = dict(result)
+                if eco:
+                    save_result["ecological_estimate"] = eco
+
+                st.markdown("---")
+                _save_identification(
+                    "💾 Save this classifier result",
+                    "save_clf_adult",
+                    "trained_classifier",
+                    save_result,
+                    target,
+                    photos=[uploaded],
+                )
+        else:
+            st.info("Upload a photo to run the trained classifier.")
 
 
 def _render_multi_angle_screening(target: str | None) -> None:
@@ -964,11 +1170,16 @@ def _render_multi_angle_screening(target: str | None) -> None:
                 "and prefer PCR confirmation."
             )
 
+        chosen = results[chosen_angle]
+        eco = _render_ecological_estimate(chosen.get("best_match"), "vision_adult_multi")
+        save_result = dict(chosen)
+        if eco:
+            save_result["ecological_estimate"] = eco
         _save_identification(
             "💾 Save this AI screening result",
             "save_vision_adult_multi",
             "ai_vision",
-            results[chosen_angle],
+            save_result,
             target,
             photos=list(uploads.values()),
         )
@@ -1001,7 +1212,8 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
 
         method = st.radio(
             "Identification method",
-            ["Manual Character Checklist", "Anopheles Deep Key", "Culex / Aedes Deep Key", "AI Photo Screening"],
+            ["Manual Character Checklist", "Anopheles Deep Key", "Culex / Aedes Deep Key",
+             "AI Photo Screening", "Trained Classifier"],
             horizontal=True,
             key="adult_method",
         )
@@ -1093,6 +1305,9 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                         )
                 else:
                     st.info("Set traits on the left and click **Resolve**.")
+
+        elif method == "Trained Classifier":
+            _render_classifier_screening(target)
 
         else:
             photo_mode = st.radio(
