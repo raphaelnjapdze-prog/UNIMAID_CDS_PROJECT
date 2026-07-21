@@ -147,6 +147,11 @@ def _is_network_error(exc: BaseException) -> bool:
     return False
 
 
+# Public name for reuse outside this module (e.g. the data layer deciding whether a
+# failed write should be queued offline rather than reported as a hard error).
+is_network_error = _is_network_error
+
+
 def get_supabase_service_client():
     return get_service_supabase_client()
 

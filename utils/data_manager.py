@@ -33,8 +33,16 @@ from utils.auth import (
     get_current_user_id,
     get_supabase_client,
     get_supabase_service_client,
+    is_network_error,
 )
 from utils.logging_config import get_logger
+from utils.offline_queue import (
+    SYNC_OK,
+    SYNC_REJECTED,
+    SYNC_RETRY,
+    drain,
+    enqueue_site_log,
+)
 
 logger = get_logger(__name__)
 
@@ -158,11 +166,75 @@ def submit_site_log_entry(
         return None
 
     specimen_id = str(uuid.uuid4())
+    # A photo needs a live upload; if that fails we still save the record (see the
+    # network-error branch below), just without the image, which can be added later.
     photo_url = upload_specimen_photo(photo_file, specimen_id) if photo_file else None
 
-    record = {
+    record = build_site_log_record(
+        specimen_id=specimen_id,
+        collection_date=collection_date,
+        collector_id=collector_id,
+        collector_label=get_collector_label() or None,
+        breeding_site_type=breeding_site_type,
+        gps_lat=gps_lat,
+        gps_lon=gps_lon,
+        anopheles_count=anopheles_count,
+        culex_count=culex_count,
+        aedes_count=aedes_count,
+        other_genera_count=other_genera_count,
+        field_notes=field_notes,
+        photo_url=photo_url,
+    )
+
+    try:
+        row = insert_specimen_record(record, client)
+        clear_specimen_records_cache()
+        return row
+    except Exception as e:
+        # A connectivity failure is recoverable: park the entry in the offline queue
+        # (it survives a reload) instead of losing what the field worker just typed.
+        # Any other failure — a schema/permission problem — would never sync, so it is
+        # surfaced honestly rather than queued to fail forever.
+        if is_network_error(e):
+            if enqueue_site_log(record):
+                logger.info("Site-log save offline; queued for sync (%s)", specimen_id)
+                return {**record, "_pending_offline": True}
+            st.error(
+                "You appear to be offline and the pending queue is full. "
+                "Reconnect and tap “Sync now” before logging more entries."
+            )
+            return None
+        logger.exception("Could not save site log entry")
+        st.error(f"Could not save site log entry: {e}")
+        return None
+
+
+def build_site_log_record(
+    *,
+    specimen_id: str,
+    collection_date: date,
+    collector_id: str,
+    collector_label: str | None,
+    breeding_site_type: str,
+    gps_lat: float | None,
+    gps_lon: float | None,
+    anopheles_count: int = 0,
+    culex_count: int = 0,
+    aedes_count: int = 0,
+    other_genera_count: int = 0,
+    field_notes: str = "",
+    photo_url: str | None = None,
+) -> dict:
+    """Build (without persisting) the specimen_records row for a field-count log.
+
+    Pure and JSON-serializable, so the same record can be inserted now or parked in
+    the offline queue and inserted later. specimen_id and collector_id are passed in
+    (not generated here) so a queued entry keeps the identity — and the QR label —
+    it was given at entry time.
+    """
+    return {
         "specimen_id": specimen_id,
-        "collection_date": collection_date.isoformat(),
+        "collection_date": collection_date.isoformat() if hasattr(collection_date, "isoformat") else collection_date,
         "collector_id": collector_id,
         "gps_lat": gps_lat,
         "gps_lon": gps_lon,
@@ -177,20 +249,55 @@ def submit_site_log_entry(
                 "other_genera_count": int(other_genera_count),
                 "field_notes": field_notes,
             },
-            "collector_label": get_collector_label() or None,
+            "collector_label": collector_label,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
         "pcr_status": "not_submitted",
     }
 
-    try:
-        response = client.table("specimen_records").insert(record).execute()
+
+def insert_specimen_record(record: dict, client=None) -> dict | None:
+    """Low-level insert of a prebuilt specimen_records row. Raises on failure so the
+    caller can distinguish a network drop (queue it) from a hard rejection (surface it);
+    does not show UI itself. Used by the online save path and by the offline drain."""
+    client = client or get_supabase_client()
+    if client is None:
+        raise RuntimeError("Supabase is not configured")
+    response = client.table("specimen_records").insert(record).execute()
+    return first_row(response)
+
+
+def sync_pending_writes() -> tuple[int, int, int]:
+    """Drain the offline queue back to Supabase. Returns (synced, remaining, rejected).
+
+    On a successful drain of anything, the specimen cache is cleared so the newly
+    landed rows appear.
+    """
+
+    def _sync(kind: str, payload: dict):
+        if kind != "site_log":
+            # Not transient — nothing will teach this build how to write that kind.
+            return SYNC_REJECTED, f"Unknown queued write kind {kind!r}"
+        try:
+            # An insert that doesn't raise landed, even when it returns no row: under
+            # RLS the anon key can be denied SELECT on what it just wrote. Requiring a
+            # row back would re-queue a write that succeeded and insert it again on the
+            # next drain — double-counting the exact catch this queue exists to protect.
+            insert_specimen_record(payload)
+            return SYNC_OK, ""
+        except Exception as e:
+            if is_network_error(e):
+                return SYNC_RETRY, str(e)
+            # A schema or permission rejection will fail identically on every retry.
+            # Entries are only queued after a *network* failure, so the payload was
+            # never server-validated — live-schema drift can surface here first.
+            logger.exception("Queued site-log entry was rejected by the server")
+            return SYNC_REJECTED, str(e)
+
+    synced, remaining, rejected = drain(_sync)
+    if synced:
         clear_specimen_records_cache()
-        return first_row(response)
-    except Exception as e:
-        logger.exception("Could not save site log entry")
-        st.error(f"Could not save site log entry: {e}")
-        return None
+    return synced, remaining, rejected
 
 
 _FIELD_LOG_GENUS_KEYS = {
