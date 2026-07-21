@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.ai_advisory import generate_ai_intervention_response
+from utils.classifier_inference import classifier_status, process_adult_image_classification
 from utils.data_manager import (
     attach_identification_to_specimen,
     extract_primary_genus,
@@ -891,6 +892,102 @@ def _render_single_photo_screening(target: str | None) -> None:
             st.info("Upload a photo to run AI-assisted screening.")
 
 
+def _render_classifier_result(result: dict) -> None:
+    """Render a trained-classifier verdict: resolved taxon, confidence, and the
+    resolution-level badge that keeps a cryptic complex from reading as a species."""
+    if "error" in result:
+        st.error(result["error"])
+        return
+
+    resolution = result.get("resolution_level", "genus")
+    color, tier_label = _RESOLUTION_STYLE.get(resolution, ("#64748B", resolution))
+
+    conf = result.get("confidence")
+    badges = ""
+    if conf is not None:
+        badges += _badge(f"Confidence: {conf * 100:.0f}%", "#0369A1")
+    badges += _badge(tier_label, color)
+    if result.get("molecular_id_required"):
+        badges += _badge("PCR confirmation required", "#D97706")
+    if result.get("stage2_uncertain"):
+        badges += _badge("Stage-2 uncertain → genus", "#64748B")
+
+    taxon = result.get("predicted_species") or result.get("genus") or "Undetermined"
+    inner = "".join(p for p in [
+        '<div style="font-size:13px; color:#64748B; font-weight:600;">Predicted Taxon</div>',
+        f'<div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{taxon}</div>',
+        f'<div style="margin:2px 0 6px;">{badges}</div>',
+    ] if p)
+    st.markdown(
+        f'<div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px; '
+        f'background:white; margin-bottom:14px;">{inner}</div>',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "🤖 Two-stage EfficientNet-B0 classifier (models/). Stage-2 output classes are "
+        "constrained so cryptic complexes (*An. gambiae* complex, *An. funestus* group) "
+        "resolve only to the complex/group — never a bare member. PCR still splits them."
+    )
+
+
+def _render_classifier_screening(target: str | None) -> None:
+    """Trained-classifier screening: honest about availability, never fabricates.
+
+    When torch or the .pth checkpoints are missing, this shows setup guidance
+    instead of a dead button — the classifier is optional and separate from the
+    deployed app (see models/README_CLASSIFIER_SETUP.md)."""
+    st.markdown("#### Trained Classifier (two-stage CNN)")
+    st.caption(
+        "EfficientNet-B0 genus → species/complex pipeline. Optional and separate from "
+        "the deployed app; enable it by installing the ML extras and training the model."
+    )
+
+    status = classifier_status()
+    if not status["available"]:
+        st.warning(status["reason"])
+        st.caption("See **models/README_CLASSIFIER_SETUP.md** to train and place the checkpoints.")
+        return
+
+    missing = status.get("stage2_missing") or []
+    if missing:
+        st.info(
+            "Species-stage checkpoints are missing for: " + ", ".join(missing) +
+            " — specimens of those genera resolve to genus level only."
+        )
+
+    col1, col2 = st.columns([4, 5])
+    with col1:
+        st.markdown("#### Upload Adult Specimen Photo")
+        st.caption("Best results: lateral view, good lighting, in-focus palps/legs/wings.")
+        uploaded = st.file_uploader(
+            "Adult image (JPG/PNG)", type=["jpg", "jpeg", "png"], key="clf_img_uploader"
+        )
+        if uploaded:
+            st.image(uploaded, caption="Uploaded specimen", width="stretch")
+
+    with col2:
+        st.markdown("#### Classifier Result")
+        if uploaded:
+            _warn_if_poor_quality(uploaded)
+            result = _screen_image_once(
+                uploaded, "clf_adult_cache", process_adult_image_classification
+            )
+            _render_classifier_result(result)
+
+            if "error" not in result:
+                st.markdown("---")
+                _save_identification(
+                    "💾 Save this classifier result",
+                    "save_clf_adult",
+                    "trained_classifier",
+                    result,
+                    target,
+                    photos=[uploaded],
+                )
+        else:
+            st.info("Upload a photo to run the trained classifier.")
+
+
 def _render_multi_angle_screening(target: str | None) -> None:
     """Screen several views of one specimen, one AI call per angle.
 
@@ -1001,7 +1098,8 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
 
         method = st.radio(
             "Identification method",
-            ["Manual Character Checklist", "Anopheles Deep Key", "Culex / Aedes Deep Key", "AI Photo Screening"],
+            ["Manual Character Checklist", "Anopheles Deep Key", "Culex / Aedes Deep Key",
+             "AI Photo Screening", "Trained Classifier"],
             horizontal=True,
             key="adult_method",
         )
@@ -1093,6 +1191,9 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
                         )
                 else:
                     st.info("Set traits on the left and click **Resolve**.")
+
+        elif method == "Trained Classifier":
+            _render_classifier_screening(target)
 
         else:
             photo_mode = st.radio(
