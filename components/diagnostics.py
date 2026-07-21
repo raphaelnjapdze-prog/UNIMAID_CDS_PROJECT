@@ -30,8 +30,14 @@ from utils.morphology_keys import (
     anopheles_key_node,
     anopheles_key_step,
     evaluate_genus_triage,
+    evaluate_larval_deepkey,
+    get_aedes_character_schema,
     get_anopheles_character_schema,
+    get_culex_character_schema,
+    get_larval_character_schema,
+    identify_aedes_species,
     identify_anopheles_species,
+    identify_culex_species,
     match_larval_morphology,
     search_species_reference,
 )
@@ -238,8 +244,26 @@ _RESOLUTION_STYLE = {
 }
 
 
+_ANOPHELES_ENGINE_CAPTION = (
+    "🔬 Weighted character engine (Gillies & Coetzee 1987; Coetzee 2020). "
+    "Cryptic complexes (*An. gambiae* complex, *An. funestus* group) are "
+    "capped at complex/group level by design — only PCR splits them."
+)
+
+
 def _render_anopheles_identification(res: dict):
     """Render the weighted-character Anopheles verdict + per-candidate audit trail."""
+    _render_character_identification(res, default_taxon="Anopheles spp.", caption=_ANOPHELES_ENGINE_CAPTION)
+
+
+def _render_character_identification(res: dict, *, default_taxon: str, caption: str):
+    """Render a weighted-character verdict + ranked candidate audit trail.
+
+    Shared by the Anopheles, Culex and Aedes deep keys — they all return the
+    same verdict shape from the character-agreement scorer, so the presentation
+    (resolved taxon, badges, ranked candidates) is identical; only the fallback
+    taxon label and the engine citation caption differ per genus.
+    """
     resolution = res.get("resolution_level", "undetermined")
     color, tier_label = _RESOLUTION_STYLE.get(resolution, ("#64748B", resolution))
 
@@ -254,7 +278,7 @@ def _render_anopheles_identification(res: dict):
     # escaped code block, so we join only non-empty parts with no newlines.
     inner = "".join(p for p in [
         '<div style="font-size:13px; color:#64748B; font-weight:600;">Resolved Taxon</div>',
-        f'<div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{res.get("taxon","Anopheles spp.")}</div>',
+        f'<div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{res.get("taxon", default_taxon)}</div>',
         f'<div style="margin:2px 0 6px;">{badges}</div>',
         f'<div style="font-size:13px; color:#475569; margin-top:8px;">{res.get("reason","")}</div>',
         f'<div style="font-size:12px; color:#64748B; margin-top:6px;"><strong>Next step:</strong> {res.get("next_step","")}</div>',
@@ -295,11 +319,7 @@ def _render_anopheles_identification(res: dict):
                 unsafe_allow_html=True,
             )
 
-    st.caption(
-        "🔬 Weighted character engine (Gillies & Coetzee 1987; Coetzee 2020). "
-        "Cryptic complexes (*An. gambiae* complex, *An. funestus* group) are "
-        "capped at complex/group level by design — only PCR splits them."
-    )
+    st.caption(caption)
 
 
 def _render_key_terminal(result: dict):
@@ -469,6 +489,144 @@ def _render_anopheles_deep_key(target: str | None = None):
             else:
                 st.error(step.get("message", "Key error."))
             st.rerun()
+
+
+_CULICINE_ENGINE_CAPTION = (
+    "🔬 Weighted character engine (Service 1990; Jupp 1996; Edwards 1941). "
+    "Cryptic taxa (*Culex pipiens* complex, Vishnui subgroup, *Cx. decens* group, "
+    "*Ae. simpsoni* complex, furcifer–taylori & caballus–juppi) are capped at "
+    "complex/group level — only PCR / genitalia split them."
+)
+
+
+def _render_culicine_deep_key(target: str | None = None):
+    """Character-scoring deep key for adult *Culex* & *Aedes*, mirroring the
+    Anopheles engine — same cryptic-complex ceiling and PCR flagging."""
+    st.markdown("#### Culex / Aedes Deep Key")
+    st.caption(
+        "Score diagnostic characters for adult *Culex* or *Aedes*. Cryptic complexes / "
+        "groups stop at complex/group level and are flagged for PCR — the engine never "
+        "manufactures a single-species answer the morphology cannot support."
+    )
+
+    genus = st.radio("Genus", ["Culex", "Aedes"], horizontal=True, key="culicine_genus")
+    st.markdown("---")
+
+    if genus == "Culex":
+        schema = get_culex_character_schema()
+        identify = identify_culex_species
+        default_taxon = "Culex spp."
+    else:
+        schema = get_aedes_character_schema()
+        identify = identify_aedes_species
+        default_taxon = "Aedes spp."
+
+    result_key = f"culicine_result_{genus.lower()}"
+
+    col1, col2 = st.columns([5, 4])
+    with col1:
+        st.markdown("##### Observed characters")
+        st.caption("Leave any character as *Not observed*. Scutal pattern and proboscis banding carry the most weight.")
+        observed = {}
+        for ch in schema:
+            label_to_id = {s["label"]: s["id"] for s in ch["states"]}
+            pick = st.selectbox(
+                ch["label"],
+                [_NOT_OBSERVED] + list(label_to_id.keys()),
+                key=f"culicine_{genus}_{ch['id']}",
+            )
+            if pick != _NOT_OBSERVED:
+                observed[ch["id"]] = label_to_id[pick]
+        run_id = st.button(f"Identify {genus}", type="primary", width="stretch", key=f"culicine_identify_{genus}")
+
+    with col2:
+        st.markdown("##### Result")
+        # Compute on click, hold in session_state so the Save button survives the
+        # rerun its own click triggers — same pattern as the Anopheles deep key.
+        if run_id and not observed:
+            st.session_state.pop(result_key, None)
+            st.info(f"Set at least one character on the left, then click **Identify {genus}**.")
+        elif run_id:
+            with st.spinner("Scoring diagnostic characters…"):
+                st.session_state[result_key] = identify(observed)
+
+        res = st.session_state.get(result_key)
+        if res:
+            _render_character_identification(res, default_taxon=default_taxon, caption=_CULICINE_ENGINE_CAPTION)
+            if res.get("resolution_level") not in ("undetermined", "genus"):
+                st.markdown("---")
+                _save_identification(
+                    f"💾 Save this {genus} result",
+                    f"save_culicine_{genus}",
+                    "manual_checklist",
+                    {
+                        "genus_triage": {"genus": genus, "confidence": res.get("confidence", 0)},
+                        "deep_key": res,
+                    },
+                    target,
+                    result_key=result_key,
+                )
+        elif not run_id:
+            st.info(f"Set characters on the left and click **Identify {genus}**.")
+
+
+def _render_larval_deep_key(target: str | None = None):
+    """Character deep key for 4th-instar larvae — resolves to GENUS only, with a
+    Culex tigripes predator/biocontrol flag. Never claims larval species."""
+    st.markdown("#### Larval Deep Key (4th instar)")
+    st.caption(
+        "Score larval characters to triage to GENUS. Wild larval species ID needs "
+        "chaetotaxy slides or molecular assays, so this engine never claims species."
+    )
+    schema = get_larval_character_schema()
+
+    col1, col2 = st.columns([5, 4])
+    with col1:
+        st.markdown("##### Observed characters")
+        observed = {}
+        for ch in schema:
+            label_to_id = {s["label"]: s["id"] for s in ch["states"]}
+            pick = st.selectbox(
+                ch["label"],
+                [_NOT_OBSERVED] + list(label_to_id.keys()),
+                key=f"larval_deep_{ch['id']}",
+            )
+            if pick != _NOT_OBSERVED:
+                observed[ch["id"]] = label_to_id[pick]
+        run_id = st.button("Resolve larval genus", type="primary", width="stretch", key="larval_deep_resolve")
+
+    with col2:
+        st.markdown("##### Result")
+        if run_id and not observed:
+            st.session_state.pop("larval_deep_result", None)
+            st.info("Set at least one character on the left, then click **Resolve larval genus**.")
+        elif run_id:
+            st.session_state["larval_deep_result"] = evaluate_larval_deepkey(observed)
+
+        res = st.session_state.get("larval_deep_result")
+        if res:
+            genus = res.get("resolved_genus", "Undetermined")
+            tier = res.get("confidence_tier", "")
+            st.markdown(f"### {genus}")
+            if tier:
+                st.markdown(_badge(tier, _TIER_COLOR.get(tier, "#64748B")), unsafe_allow_html=True)
+            if res.get("biocontrol_candidate"):
+                st.markdown(_badge("🎉 Biocontrol candidate (Culex tigripes)", "#16A34A"), unsafe_allow_html=True)
+            st.write(res.get("notes", ""))
+            if res.get("next_step"):
+                st.caption(f"Next step: {res['next_step']}")
+            if res.get("resolution_level") != "undetermined":
+                st.markdown("---")
+                _save_identification(
+                    "💾 Save this larval deep-key result",
+                    "save_larval_deep",
+                    "manual_checklist",
+                    res,
+                    target,
+                    result_key="larval_deep_result",
+                )
+        elif not run_id:
+            st.info("Set characters on the left and click **Resolve larval genus**.")
 
 
 _NEW_SPECIMEN = "— New specimen (create a new record) —"
@@ -843,7 +1001,7 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
 
         method = st.radio(
             "Identification method",
-            ["Manual Character Checklist", "Anopheles Deep Key", "AI Photo Screening"],
+            ["Manual Character Checklist", "Anopheles Deep Key", "Culex / Aedes Deep Key", "AI Photo Screening"],
             horizontal=True,
             key="adult_method",
         )
@@ -851,6 +1009,9 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
 
         if method == "Anopheles Deep Key":
             _render_anopheles_deep_key(target)
+
+        elif method == "Culex / Aedes Deep Key":
+            _render_culicine_deep_key(target)
 
         elif method == "Manual Character Checklist":
             col1, col2 = st.columns([5, 4])
@@ -962,13 +1123,16 @@ def render_diagnostics_page(active_df: pd.DataFrame | None = None):
 
         l_method = st.radio(
             "Identification method",
-            ["Manual Character Checklist", "AI Photo Screening"],
+            ["Manual Character Checklist", "Larval Deep Key", "AI Photo Screening"],
             horizontal=True,
             key="larval_method",
         )
         st.markdown("---")
 
-        if l_method == "Manual Character Checklist":
+        if l_method == "Larval Deep Key":
+            _render_larval_deep_key(target)
+
+        elif l_method == "Manual Character Checklist":
             col1, col2 = st.columns([5, 4])
 
             with col1:
