@@ -166,9 +166,10 @@ class TestCoupletKeyGuardrail:
 
     def test_gambiae_terminal_collapses_to_complex(self):
         # Walk: not broad/speckled → narrow rings → not speckled palps →
-        # not pale-tipped → spotted wing → lowland → standard breeder.
+        # not pale-tipped → spotted wing → lowland → standard breeder →
+        # standard rain-pool breeder (couplet 17, past the highland-amharicus split).
         node = ANOPHELES_KEY_ROOT
-        for choice in (1, 1, 1, 1, 1, 1, 1):
+        for choice in (1, 1, 1, 1, 1, 1, 1, 1):
             step = anopheles_key_step(node, choice)
             if step["type"] == "terminal":
                 result = step["result"]

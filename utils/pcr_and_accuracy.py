@@ -291,7 +291,13 @@ def _extract_predicted_label(field_screening_result: Dict[str, Any]) -> Optional
         # rich taxon — "An. gambiae complex", "Anopheles pharoensis", etc. Prefer
         # that over the bare genus so accuracy credits complex/species precision
         # rather than scoring every deep-key call as genus-level "Anopheles".
-        deep = result.get("anopheles_deep_key") or result.get("anopheles_couplet_key")
+        # Anopheles engine, or the genus-agnostic Culex/Aedes deep key (stored
+        # under "deep_key") — all carry a rich, resolution-aware "taxon".
+        deep = (
+            result.get("anopheles_deep_key")
+            or result.get("anopheles_couplet_key")
+            or result.get("deep_key")
+        )
         if deep and deep.get("taxon"):
             return deep["taxon"]
 

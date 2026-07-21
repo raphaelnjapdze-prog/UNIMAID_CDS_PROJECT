@@ -247,7 +247,66 @@ SPECIES_CATALOG = {
             "group_complex": "Invasive Strain",
             "field_markers": ["Container / urban water breeder", "Unique palpal banding sequences (see 2020 key)"],
             "notes": "⚠️ CRITICAL SURVEILLANCE TARGET: Invasive Asian urban vector expanding across the Horn of Africa and Nigeria. Breeds in artificial containers and urban settings, mimicking Aedes aegypti bionomics."
-        }
+        },
+        # ── Desert / oasis, highland and additional cryptic-group Anopheles ──
+        {"id": 21, "name": "Anopheles pretoriensis", "vector_status": "Non-vector / very minor",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Speckled legs", "Pale-tipped palps", "Drier savanna, rock pools"],
+         "notes": "Widespread in drier/rocky savanna. Superficially coustani-like but structurally separable; not an important vector."},
+        {"id": 22, "name": "Anopheles sergentii", "vector_status": "Oasis malaria vector (N. Africa / Sahara)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Desert oasis breeder", "Narrow apical tarsal pale bands"],
+         "notes": "The classic Saharan 'oasis' malaria vector; localised to spring-fed oases and desert margins."},
+        {"id": 23, "name": "Anopheles multicolor", "vector_status": "Minor / local vector (arid zones)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Very pale body", "Broad pale tarsal banding", "Saline oasis / arid habitats"],
+         "notes": "Pale desert species of saline oasis waters across North Africa and the Sahel fringe."},
+        {"id": 24, "name": "Anopheles dthali", "vector_status": "Minor / local vector (arid zones)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Distinctly speckled legs", "Rocky wadi / mountain-desert pools"],
+         "notes": "Rock-pool breeder of arid mountain wadis (Saharo-Arabian). Speckled legs; can be locally involved in transmission."},
+        {"id": 25, "name": "Anopheles cinereus", "vector_status": "Minor / local vector (highland)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Pale, greyish body", "Ethiopian / East African highland distribution"],
+         "notes": "Cool highland species (notably the Ethiopian highlands). Pale; confirm with full couplet key."},
+        {"id": 26, "name": "Anopheles carnevalei", "vector_status": "Secondary vector (Central Africa)",
+         "molecular_id_required": True, "group_complex": "An. nili group",
+         "field_markers": ["Standard nili-group features"], "notes": "Nili-group member; field-inseparable from An. nili — PCR required."},
+        {"id": 27, "name": "Anopheles ovengensis", "vector_status": "Secondary vector (Central Africa)",
+         "molecular_id_required": True, "group_complex": "An. nili group",
+         "field_markers": ["Standard nili-group features"], "notes": "Nili-group member; PCR required to separate from An. nili."},
+        {"id": 28, "name": "Anopheles somalicus", "vector_status": "Non-vector / minor",
+         "molecular_id_required": True, "group_complex": "An. nili group",
+         "field_markers": ["Standard nili-group features"], "notes": "Nili-group member; PCR required."},
+        {"id": 29, "name": "Anopheles vaneedeni", "vector_status": "Secondary vector",
+         "molecular_id_required": True, "group_complex": "An. funestus group",
+         "field_markers": ["Standard funestus-group features"], "notes": "Funestus-group member; competent in the lab. Field-inseparable — PCR required."},
+        {"id": 30, "name": "Anopheles parensis", "vector_status": "Non-vector",
+         "molecular_id_required": True, "group_complex": "An. funestus group",
+         "field_markers": ["Standard funestus-group features"], "notes": "Funestus-group non-vector; PCR required."},
+        {"id": 31, "name": "Anopheles rivulorum-like", "vector_status": "Minor / uncertain vector",
+         "molecular_id_required": True, "group_complex": "An. funestus group",
+         "field_markers": ["Standard funestus-group features"], "notes": "Undescribed funestus-group taxon resolved only by molecular assay."},
+        {"id": 32, "name": "Anopheles paludis", "vector_status": "Secondary vector (Central Africa)",
+         "molecular_id_required": False, "group_complex": "An. coustani group",
+         "field_markers": ["Coustani-group profile", "Forest / swamp habitats"], "notes": "Coustani-group member; log as coustani-group in routine surveys."},
+        {"id": 33, "name": "Anopheles tenebrosus", "vector_status": "Minor / local vector",
+         "molecular_id_required": False, "group_complex": "An. coustani group",
+         "field_markers": ["Coustani-group profile"], "notes": "Coustani-group member; field-inseparable from coustani — record as group."},
+        {"id": 34, "name": "Anopheles marshallii", "vector_status": "Minor / local vector",
+         "molecular_id_required": True, "group_complex": "An. marshallii group",
+         "field_markers": ["Spotted wings", "Forest / montane"], "notes": "Nominotypical marshallii-group member; group is a species-rich cryptic assemblage — PCR/keys required."},
+        {"id": 35, "name": "Anopheles hancocki", "vector_status": "Minor / local vector",
+         "molecular_id_required": True, "group_complex": "An. marshallii group",
+         "field_markers": ["Marshallii-group profile"], "notes": "Marshallii-group member; molecular confirmation advised."},
+        {"id": 36, "name": "Anopheles longipalpis", "vector_status": "Non-vector / minor",
+         "molecular_id_required": True, "group_complex": "An. marshallii group",
+         "field_markers": ["Conspicuously long palps", "Marshallii-group profile"],
+         "notes": "Marshallii-group member with notably long palps (the 'type C' form); still resolved to group without molecular work."},
+        {"id": 37, "name": "Anopheles amharicus", "vector_status": "Non-vector (zoophilic)",
+         "molecular_id_required": True, "group_complex": "An. gambiae complex",
+         "field_markers": ["Standard gambiae-complex features", "Ethiopian highland, zoophilic"],
+         "notes": "Gambiae-complex member (formerly An. quadriannulatus species B). Morphologically identical to the complex — PCR mandatory."}
     ],
     "Culex": [
         {
@@ -430,7 +489,43 @@ SPECIES_CATALOG = {
             "group_complex": "None",
             "field_markers": ["Distinctive striped adult legs", "Large, robust body", "Striking tiger larval bands"],
             "notes": "🎉 BIOLOGICAL CONTROL INDICATOR: Adults are completely harmless. The highly recognizable 'tiger' larvae actively consume vector larvae. Flag immediately as a positive ecological balancer."
-        }
+        },
+        # ── Coastal, highland and decens-group Culex ──
+        {"id": 21, "name": "Culex thalassius", "vector_status": "WNV vector (coastal)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Pale scutal stripe", "Coastal saline / brackish habitats"],
+         "notes": "Salt-tolerant coastal relative of the univittatus group; brackish pools and estuarine margins."},
+        {"id": 22, "name": "Culex sitiens", "vector_status": "Arbovirus vector (coastal)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Pale-banded proboscis and tarsi", "Coastal / estuarine breeder"],
+         "notes": "Estuarine, salt-tolerant species of the East African and Indian-Ocean coasts."},
+        {"id": 23, "name": "Culex annulioris", "vector_status": "Minor / nuisance vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Distinctly banded legs", "Forest / swamp margins"],
+         "notes": "Forest and swamp species with conspicuously ringed legs."},
+        {"id": 24, "name": "Culex guiarti", "vector_status": "Minor / nuisance vector",
+         "molecular_id_required": False, "group_complex": "Cx. decens group",
+         "field_markers": ["Decens-group profile", "Nondescript brown scaling"],
+         "notes": "Decens-group member; log as decens-group in routine surveillance."},
+        {"id": 25, "name": "Culex trifilatus", "vector_status": "Minor / nuisance vector",
+         "molecular_id_required": False, "group_complex": "Cx. decens group",
+         "field_markers": ["Decens-group profile"], "notes": "Decens-group member; field-inseparable from Cx. decens."},
+        {"id": 26, "name": "Culex invidiosus", "vector_status": "Minor / nuisance vector",
+         "molecular_id_required": False, "group_complex": "Cx. decens group",
+         "field_markers": ["Decens-group profile"], "notes": "Decens-group member; record as group."},
+        {"id": 27, "name": "Culex nakuruensis", "vector_status": "Minor / local vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["East African highland distribution"], "notes": "High-altitude species (Kenyan highlands); genital dissection for validation."},
+        {"id": 28, "name": "Culex vansomereni", "vector_status": "Minor / local vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Highland forest distribution"], "notes": "East African montane-forest species."},
+        {"id": 29, "name": "Culex grahamii", "vector_status": "Minor / nuisance vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Very small", "Dark brown, unremarkable scaling"],
+         "notes": "Tiny, widespread ground-pool breeder; easily overlooked, low vector significance."},
+        {"id": 30, "name": "Culex horridus", "vector_status": "Minor / nuisance vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Forest distribution", "Dark legs"], "notes": "Forest species; requires optical key tracking."}
     ],
     "Aedes": [
         {
@@ -613,7 +708,44 @@ SPECIES_CATALOG = {
             "group_complex": "None",
             "field_markers": ["Distinct silver-spotted scutum pattern"],
             "notes": "Easily identified by its distinctive silver thoracic spotting; tied closely with floodwater systems in RVF-endemic zones."
-        }
+        },
+        # ── Floodwater (RVF), coastal and simpsoni-/caballus-group Aedes ──
+        {"id": 21, "name": "Aedes vexans", "vector_status": "RVF (secondary), arbovirus vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Narrow pale tarsal bands", "Floodwater breeder", "Nondescript scutum"],
+         "notes": "Near-cosmopolitan floodwater species; large seasonal broods can amplify RVF and other arboviruses."},
+        {"id": 22, "name": "Aedes caballus", "vector_status": "RVF vector (Southern Africa)",
+         "molecular_id_required": True, "group_complex": "Ae. caballus-juppi pair",
+         "field_markers": ["Floodwater / pan breeder", "Pale-banded legs"],
+         "notes": "Southern African floodwater RVF vector; sibling of Ae. juppi — reliable separation needs molecular/genitalic work."},
+        {"id": 23, "name": "Aedes juppi", "vector_status": "RVF vector (Southern Africa)",
+         "molecular_id_required": True, "group_complex": "Ae. caballus-juppi pair",
+         "field_markers": ["Floodwater / pan breeder"], "notes": "Cryptic sibling of Ae. caballus; resolve the pair molecularly."},
+        {"id": 24, "name": "Aedes fowleri", "vector_status": "RVF vector (secondary)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Floodwater breeder", "Pale-banded legs"], "notes": "Floodwater species implicated in RVF amplification in arid zones."},
+        {"id": 25, "name": "Aedes dalzieli", "vector_status": "Arbovirus vector (sylvatic/savanna)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Savanna floodwater breeder", "Pale-banded tarsi"],
+         "notes": "West African savanna species carrying several sylvatic arboviruses."},
+        {"id": 26, "name": "Aedes pembaensis", "vector_status": "RVF vector (coastal)",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Coastal crab-hole breeder", "Broad pale tarsal bands"],
+         "notes": "Coastal East African species breeding in crab holes; a recognised RVF vector in littoral zones."},
+        {"id": 27, "name": "Aedes bromeliae", "vector_status": "Yellow fever vector (intermediate cycle)",
+         "molecular_id_required": True, "group_complex": "Ae. simpsoni complex",
+         "field_markers": ["Plant-axil breeder", "Simpsoni-complex profile"],
+         "notes": "The anthropophilic simpsoni-complex member — the key YF bridge vector. Morphologically cryptic within the complex — PCR required."},
+        {"id": 28, "name": "Aedes lilii", "vector_status": "Minor sylvatic vector",
+         "molecular_id_required": True, "group_complex": "Ae. simpsoni complex",
+         "field_markers": ["Plant-axil breeder", "Simpsoni-complex profile"],
+         "notes": "Simpsoni-complex member; not anthropophilic. Resolve the complex molecularly."},
+        {"id": 29, "name": "Aedes hirsutus", "vector_status": "Minor arbovirus vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Pale-banded legs", "Savanna floodwater"], "notes": "Savanna floodwater species of minor arboviral significance."},
+        {"id": 30, "name": "Aedes tarsalis", "vector_status": "Minor sylvatic vector",
+         "molecular_id_required": False, "group_complex": "None",
+         "field_markers": ["Forest distribution", "Pale-banded tarsi"], "notes": "Forest species; confirm via structural key."}
     ]
 }
 
@@ -635,22 +767,31 @@ SPECIES_CATALOG = {
 SPECIES_COMPLEXES = {
     "An. gambiae complex":   {"genus": "Anopheles", "trigger": "gambiae",
                               "members": ["gambiae", "coluzzii", "arabiensis", "merus",
-                                          "melas", "quadriannulatus", "bwambae"]},
+                                          "melas", "quadriannulatus", "amharicus", "bwambae"]},
     "An. funestus group":    {"genus": "Anopheles", "trigger": "funestus",
-                              "members": ["funestus", "rivulorum", "parensis",
-                                          "leesoni", "vaneedeni"]},
+                              "members": ["funestus", "rivulorum", "rivulorum-like",
+                                          "parensis", "leesoni", "vaneedeni"]},
     "An. coustani group":    {"genus": "Anopheles", "trigger": "coustani",
-                              "members": ["coustani", "ziemanni", "paludis", "namibiensis"]},
+                              "members": ["coustani", "ziemanni", "paludis",
+                                          "tenebrosus", "namibiensis"]},
     "An. nili group":        {"genus": "Anopheles", "trigger": "nili",
                               "members": ["nili", "ovengensis", "somalicus", "carnevalei"]},
     "An. moucheti group":    {"genus": "Anopheles", "trigger": "moucheti",
                               "members": ["moucheti", "nigeriensis", "bervoetsi"]},
     "An. marshallii group":  {"genus": "Anopheles", "trigger": "marshallii",
-                              "members": ["marshallii", "demeilloni", "hancocki"]},
+                              "members": ["marshallii", "demeilloni", "hancocki", "longipalpis"]},
     "Culex pipiens complex": {"genus": "Culex", "trigger": "pipiens",
                               "members": ["pipiens", "quinquefasciatus", "molestus"]},
+    "Vishnui Subgroup":      {"genus": "Culex", "trigger": "vishnui",
+                              "members": ["tritaeniorhynchus", "vishnui", "pseudovishnui"]},
+    "Cx. decens group":      {"genus": "Culex", "trigger": "decens",
+                              "members": ["decens", "guiarti", "trifilatus", "invidiosus"]},
     "Aedes simpsoni complex": {"genus": "Aedes", "trigger": "simpsoni",
                                "members": ["simpsoni", "bromeliae", "lilii"]},
+    "Ae. furcifer-taylori group": {"genus": "Aedes", "trigger": "furcifer",
+                                   "members": ["furcifer", "taylori"]},
+    "Ae. caballus-juppi pair": {"genus": "Aedes", "trigger": "caballus",
+                                "members": ["caballus", "juppi"]},
 }
 
 
@@ -939,9 +1080,37 @@ ANOPHELES_CHARACTERS = {
             "small": "Small",
         },
     },
+    # ── Named costa pale/dark spots (Gillies & Coetzee 1987 terminology),
+    #    base → apex, plus maxillary-palp length. Field/stereo-visible subset. ──
+    "humeral_pale_spot": {
+        "label": "Costa — humeral pale spot (wing base)", "weight": 2,
+        "states": {"present": "Present", "absent": "Absent"},
+    },
+    "presector_pale_spot": {
+        "label": "Costa — presector pale spot", "weight": 2,
+        "states": {"present": "Present", "absent": "Absent"},
+    },
+    "accessory_sector_pale_spot": {
+        "label": "Costa — accessory sector pale spot", "weight": 3,
+        "states": {"present": "Present", "absent": "Absent"},
+    },
+    "subcostal_pale_spot": {
+        "label": "Costa — subcostal pale spot", "weight": 2,
+        "states": {"present": "Present", "absent": "Absent"},
+    },
+    "preapical_dark_spot": {
+        "label": "Costa — preapical dark spot", "weight": 2,
+        "states": {"present": "Present", "absent": "Absent"},
+    },
+    "palp_length": {
+        "label": "Maxillary palp length (relative to proboscis)", "weight": 2,
+        "states": {"normal": "About as long as proboscis", "long": "Conspicuously long / slender"},
+    },
 }
 
 # Shared state templates for cryptic taxa whose members are structurally identical.
+# The named costa pale/dark-spot states are backfilled here (only confident,
+# defensible directions) so recording those characters actually discriminates.
 _GAMBIAE_COMPLEX_STATES = {
     "proboscis": "dark_uniform",
     "palp_pale_bands": "three_bands",
@@ -953,6 +1122,12 @@ _GAMBIAE_COMPLEX_STATES = {
     "leg_speckling": "unspeckled",
     "wing_fringe_spots": "present",
     "body_size": "medium",
+    "humeral_pale_spot": "absent",
+    "presector_pale_spot": "present",
+    "accessory_sector_pale_spot": "absent",
+    "subcostal_pale_spot": "present",
+    "preapical_dark_spot": "present",
+    "palp_length": "normal",
 }
 _FUNESTUS_GROUP_STATES = {
     "proboscis": "dark_uniform",
@@ -965,6 +1140,12 @@ _FUNESTUS_GROUP_STATES = {
     "leg_speckling": "unspeckled",
     "wing_fringe_spots": "present",
     "body_size": "medium",
+    "humeral_pale_spot": "present",
+    "presector_pale_spot": "present",
+    "accessory_sector_pale_spot": "present",
+    "subcostal_pale_spot": "present",
+    "preapical_dark_spot": "present",
+    "palp_length": "normal",
 }
 _COUSTANI_GROUP_STATES = {
     "proboscis": "pale_tipped",
@@ -975,6 +1156,9 @@ _COUSTANI_GROUP_STATES = {
     "leg_speckling": "speckled",
     "wing_fringe_spots": "present",
     "body_size": "medium",
+    "presector_pale_spot": "present",
+    "accessory_sector_pale_spot": "present",
+    "palp_length": "normal",
 }
 
 # species_name -> structural profile. Names MUST match SPECIES_CATALOG["Anopheles"].
@@ -1134,6 +1318,79 @@ ANOPHELES_KEY_PROFILES = {
                            "Palpal banding per Coetzee (2020) invasive-vector key; CONFIRM BY PCR"],
     },
 }
+
+# ── Extended profiles: desert/oasis & highland species (genuinely separable),
+#    plus additional cryptic-group members that collapse to their group/complex
+#    with molecular_id_required=True. Members share a group state template so the
+#    scorer treats them as inseparable — exactly the guardrail these encode. ──
+_NILI_GROUP_STATES = dict(ANOPHELES_KEY_PROFILES["Anopheles nili"]["character_states"])
+_MARSHALLII_GROUP_STATES = {
+    "proboscis": "dark_uniform", "palp_pale_bands": "three_bands", "vein6_dark_spots": "two_spots",
+    "hind_tarsi": "narrow_pale_bands", "leg_speckling": "unspeckled", "body_size": "medium",
+    "presector_pale_spot": "present", "accessory_sector_pale_spot": "present",
+}
+
+ANOPHELES_KEY_PROFILES.update({
+    # ── genuinely distinguishable additions (species-level, no forced PCR) ──
+    "Anopheles pretoriensis": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis": "pale_tipped", "palp_pale_bands": "three_bands",
+            "hind_tarsi": "narrow_pale_bands", "hind_tarsomere5": "dark", "leg_speckling": "speckled",
+            "body_size": "medium", "accessory_sector_pale_spot": "present"},
+        "discriminators": ["Speckled legs + pale-tipped palps, drier/rocky savanna",
+                           "Separable from coustani group by tarsal & wing detail"]},
+    "Anopheles sergentii": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "hind_tarsi": "narrow_pale_bands", "hind_tarsomere5": "dark", "leg_speckling": "unspeckled",
+            "body_size": "medium", "costa_wing_spots": "few_pale_spots"},
+        "discriminators": ["Saharan oasis vector — habitat is a strong contextual cue",
+                           "Narrow apical tarsal pale bands"]},
+    "Anopheles multicolor": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "hind_tarsi": "broad_white_bands", "hind_tarsomere5": "all_pale", "leg_speckling": "speckled",
+            "body_size": "medium", "costa_wing_spots": "many_pale_spots"},
+        "discriminators": ["Very pale, broad tarsal banding, saline oasis habitat"]},
+    "Anopheles dthali": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "hind_tarsi": "narrow_pale_bands", "leg_speckling": "speckled", "body_size": "medium",
+            "presector_pale_spot": "present"},
+        "discriminators": ["Speckled legs, rocky desert wadi pools"]},
+    "Anopheles cinereus": {
+        "resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis": "dark_uniform", "palp_pale_bands": "three_bands",
+            "costa_wing_spots": "largely_pale", "hind_tarsi": "narrow_pale_bands",
+            "leg_speckling": "unspeckled", "body_size": "medium"},
+        "discriminators": ["Pale greyish highland species (Ethiopian highlands)"]},
+    # ── cryptic-group additions (collapse to group; PCR flagged) ──
+    "Anopheles carnevalei": {"resolution_level": "group", "complex": "An. nili group",
+        "character_states": _NILI_GROUP_STATES, "discriminators": ["Nili-group — PCR required"]},
+    "Anopheles ovengensis": {"resolution_level": "group", "complex": "An. nili group",
+        "character_states": _NILI_GROUP_STATES, "discriminators": ["Nili-group — PCR required"]},
+    "Anopheles somalicus": {"resolution_level": "group", "complex": "An. nili group",
+        "character_states": _NILI_GROUP_STATES, "discriminators": ["Nili-group — PCR required"]},
+    "Anopheles vaneedeni": {"resolution_level": "group", "complex": "An. funestus group",
+        "character_states": dict(_FUNESTUS_GROUP_STATES), "discriminators": ["Funestus-group — PCR required"]},
+    "Anopheles parensis": {"resolution_level": "group", "complex": "An. funestus group",
+        "character_states": dict(_FUNESTUS_GROUP_STATES), "discriminators": ["Funestus-group non-vector — PCR required"]},
+    "Anopheles rivulorum-like": {"resolution_level": "group", "complex": "An. funestus group",
+        "character_states": dict(_FUNESTUS_GROUP_STATES), "discriminators": ["Funestus-group — molecular only"]},
+    "Anopheles paludis": {"resolution_level": "group", "complex": "An. coustani group",
+        "character_states": dict(_COUSTANI_GROUP_STATES), "discriminators": ["Coustani-group — record as group"]},
+    "Anopheles tenebrosus": {"resolution_level": "group", "complex": "An. coustani group",
+        "character_states": dict(_COUSTANI_GROUP_STATES), "discriminators": ["Coustani-group — record as group"]},
+    "Anopheles marshallii": {"resolution_level": "group", "complex": "An. marshallii group",
+        "character_states": _MARSHALLII_GROUP_STATES, "discriminators": ["Marshallii-group — cryptic assemblage"]},
+    "Anopheles hancocki": {"resolution_level": "group", "complex": "An. marshallii group",
+        "character_states": _MARSHALLII_GROUP_STATES, "discriminators": ["Marshallii-group — molecular advised"]},
+    "Anopheles longipalpis": {"resolution_level": "group", "complex": "An. marshallii group",
+        "character_states": {**_MARSHALLII_GROUP_STATES, "palp_length": "long"},
+        "discriminators": ["Long palps flag the marshallii-group 'type C' form; still group-level"]},
+    "Anopheles amharicus": {"resolution_level": "complex", "complex": "An. gambiae complex",
+        "character_states": dict(_GAMBIAE_COMPLEX_STATES), "discriminators": ["Gambiae-complex — PCR mandatory"]},
+})
 
 
 def get_anopheles_character_schema() -> list[dict]:
@@ -1312,7 +1569,7 @@ ANOPHELES_COUPLET_KEY = {
         "question": "Large, robust body with FOUR palpal pale bands and speckled legs?",
         "leads": [
             {"text": "Yes — large, 4 palpal bands, speckled legs, broad pale tarsal blocks", "taxon": "Anopheles pharoensis"},
-            {"text": "No — medium body, hind tarsi reddish/pale ('red-footed'), legs speckled", "taxon": "Anopheles rufipes"},
+            {"text": "No — medium body, other broad-band / speckled savanna & desert forms", "goto": "12"},
         ],
     },
     "3": {
@@ -1367,7 +1624,7 @@ ANOPHELES_COUPLET_KEY = {
     "10": {
         "question": "Cool highland / montane distribution (East & Central African highlands)?",
         "leads": [
-            {"text": "Yes — highland / montane species", "taxon": "Anopheles demeilloni", "group": "An. marshallii group"},
+            {"text": "Yes — cool highland / montane species", "goto": "16"},
             {"text": "No — lowland / savanna distribution", "goto": "11"},
         ],
     },
@@ -1375,6 +1632,51 @@ ANOPHELES_COUPLET_KEY = {
         "question": "Container / urban breeding with palpal banding matching the Coetzee (2020) invasive-vector key?",
         "leads": [
             {"text": "Yes — urban container breeder (invasive profile)", "taxon": "Anopheles stephensi", "alert": True},
+            {"text": "No — standard breeder, spotted-wing lowland Anopheles", "goto": "17"},
+        ],
+    },
+    # ── Desert / oasis branch (off couplet 2) ──
+    "12": {
+        "question": "Hind tarsi reddish-brown ('red-footed'), moist savanna / rice fields?",
+        "leads": [
+            {"text": "Yes — red-footed, speckled legs", "taxon": "Anopheles rufipes"},
+            {"text": "No — pale / speckled, drier or arid habitat", "goto": "13"},
+        ],
+    },
+    "13": {
+        "question": "Arid-zone specimen: Saharan oasis, saline pan or rocky desert wadi?",
+        "leads": [
+            {"text": "Yes — arid / oasis / desert habitat", "goto": "14"},
+            {"text": "No — drier savanna, rock pools", "taxon": "Anopheles pretoriensis"},
+        ],
+    },
+    "14": {
+        "question": "Very pale body with broad pale tarsal banding, saline oasis water?",
+        "leads": [
+            {"text": "Yes — very pale, broad bands", "taxon": "Anopheles multicolor"},
+            {"text": "No", "goto": "15"},
+        ],
+    },
+    "15": {
+        "question": "Conspicuously speckled legs, rocky mountain-desert wadi pools?",
+        "leads": [
+            {"text": "Yes — speckled legs, wadi pools", "taxon": "Anopheles dthali"},
+            {"text": "No — narrow apical tarsal bands, spring-fed oasis", "taxon": "Anopheles sergentii"},
+        ],
+    },
+    # ── Highland split (off couplet 10): marshallii group vs An. cinereus ──
+    "16": {
+        "question": "Spotted wings + montane-forest profile (marshallii group)?",
+        "leads": [
+            {"text": "Yes — marshallii-group profile", "taxon": "Anopheles demeilloni", "group": "An. marshallii group"},
+            {"text": "No — pale greyish, Ethiopian highland", "taxon": "Anopheles cinereus"},
+        ],
+    },
+    # ── Gambiae-complex montane member (off couplet 11) ──
+    "17": {
+        "question": "Ethiopian-highland, strictly zoophilic gambiae-complex member?",
+        "leads": [
+            {"text": "Yes — highland zoophilic", "taxon": "Anopheles amharicus", "complex": "An. gambiae complex"},
             {"text": "No — standard rain-pool / permanent-water breeder", "taxon": "Anopheles gambiae (s.s.)", "complex": "An. gambiae complex"},
         ],
     },
@@ -1446,4 +1748,424 @@ def anopheles_key_step(node_id: str, lead_index: int) -> dict:
         nxt = lead["goto"]
         return {"type": "couplet", "node_id": nxt, "couplet": ANOPHELES_COUPLET_KEY[nxt]}
     return {"type": "terminal", "result": _resolve_key_terminal(lead)}
+
+
+# ==========================================================================
+#  GENERIC CHARACTER-AGREEMENT SCORER (shared by Culex & Aedes deep keys)
+# --------------------------------------------------------------------------
+#  A genus-agnostic reduction of the Anopheles engine. It enforces the SAME
+#  cryptic-taxon ceiling: any complex/group winner collapses to the group name
+#  with molecular_id_required=True, and never manufactures a single-species
+#  answer the morphology cannot support.
+# ==========================================================================
+def _genus_species_index(genus: str) -> dict:
+    """name -> SPECIES_CATALOG entry for a genus (vector_status/notes lookup)."""
+    return {sp["name"]: sp for sp in SPECIES_CATALOG.get(genus, [])}
+
+
+def identify_by_characters(observed_characters, *, characters, profiles,
+                           species_index, genus_label, contradiction_penalty=0.75,
+                           min_confidence=40, min_compared=2):
+    """Weighted character-agreement identifier for one genus.
+
+    `characters`    : {char_id: {weight, states, ...}}
+    `profiles`      : {species_name: {resolution_level, complex, character_states, discriminators}}
+    `species_index` : {species_name: catalog_entry}
+    Returns the same verdict shape as identify_anopheles_species().
+    """
+    observed = {cid: st for cid, st in (observed_characters or {}).items()
+                if cid in characters and st}
+    if not observed:
+        return {"resolution_level": "undetermined", "taxon": f"{genus_label} spp.",
+                "confidence": 0, "candidates": [], "molecular_id_required": False,
+                "reason": "No diagnostic characters supplied.",
+                "next_step": "Record scutal, proboscis, tarsal and wing characters."}
+
+    scored = []
+    for name, profile in profiles.items():
+        states = profile["character_states"]
+        matched_w = total_w = matched = contradicted = 0
+        for cid, obs_state in observed.items():
+            if cid not in states:
+                continue
+            weight = characters[cid]["weight"]
+            total_w += weight
+            if _state_matches(obs_state, states[cid]):
+                matched_w += weight
+                matched += 1
+            else:
+                contradicted += 1
+        if total_w == 0:
+            continue
+        raw = matched_w - contradiction_penalty * (total_w - matched_w)
+        confidence = max(0, min(100, int(round((matched_w / total_w) * 100))))
+        sp = species_index.get(name, {})
+        res = profile.get("resolution_level", "species")
+        scored.append({"species_name": name, "complex": profile.get("complex", "None"),
+                       "resolution_level": res, "raw_score": round(raw, 2), "confidence": confidence,
+                       "characters_matched": matched, "characters_contradicted": contradicted,
+                       "characters_compared": matched + contradicted,
+                       "vector_status": sp.get("vector_status", "Unknown"),
+                       "molecular_id_required": sp.get("molecular_id_required", res in ("complex", "group")),
+                       "biosecurity_alert": sp.get("biosecurity_alert", profile.get("biosecurity_alert", False)),
+                       "biocontrol_indicator": sp.get("biocontrol_indicator", False),
+                       "discriminators": profile.get("discriminators", []), "notes": sp.get("notes", "")})
+
+    # Surveillance-safe tie-break: when two taxa match the observed characters
+    # *equally*, prefer the cryptic group/complex (flag "needs PCR") rather than
+    # commit to one look-alike species. Real score differences always dominate.
+    def _is_cryptic(c):
+        return 1 if c["resolution_level"] in ("complex", "group") else 0
+    scored.sort(key=lambda c: (c["raw_score"], _is_cryptic(c), c["confidence"],
+                               c["characters_matched"]), reverse=True)
+    positive = [c for c in scored if c["raw_score"] > 0]
+    ranked = positive or scored[:1]
+    top = ranked[0]
+
+    if top["confidence"] < min_confidence or top["characters_compared"] < min_compared:
+        return {"resolution_level": "genus", "taxon": f"{genus_label} spp.",
+                "confidence": top["confidence"], "candidates": ranked[:6],
+                "molecular_id_required": False,
+                "reason": "Character agreement too weak/ambiguous to resolve below genus.",
+                "next_step": "Add more diagnostic characters or use a dichotomous key."}
+
+    ceiling = top["resolution_level"]
+    if ceiling in ("complex", "group"):
+        complex_name = top["complex"]
+        members = [c["species_name"] for c in scored if c["complex"] == complex_name]
+        return {"resolution_level": ceiling, "taxon": complex_name, "confidence": top["confidence"],
+                "candidates": ranked[:6], "complex_members": members, "molecular_id_required": True,
+                "reason": (f"Characters match the {complex_name}; its members are morphologically "
+                           f"inseparable, so identification stops at the {ceiling} level."),
+                "next_step": "Submit for PCR (species-diagnostic assay) — morphology cannot split this taxon."}
+
+    return {"resolution_level": "species", "taxon": top["species_name"], "confidence": top["confidence"],
+            "candidates": ranked[:6], "molecular_id_required": top["molecular_id_required"],
+            "biosecurity_alert": top["biosecurity_alert"], "biocontrol_indicator": top["biocontrol_indicator"],
+            "reason": f"Best structural match: {top['species_name']} ({top['confidence']}% weighted agreement).",
+            "next_step": "Verify the listed discriminators against the full key before reporting."}
+
+
+# ==========================================================================
+#  CULEX DEEP-KEY ENGINE
+# ==========================================================================
+CULEX_CHARACTERS = {
+    "proboscis_band": {"label": "Proboscis pale banding", "weight": 4,
+        "states": {"none": "No pale bands (dark proboscis)", "one_median": "Single median pale band",
+                   "two_bands": "Two pale bands", "three_bands": "Three pale bands"}},
+    "tarsi_bands": {"label": "Tarsal pale banding", "weight": 3,
+        "states": {"dark": "Entirely dark", "pale_banded": "Pale bands present",
+                   "variegated_rings": "Distinct pale rings ('variegated feet')"}},
+    "scutal_stripe": {"label": "Scutum pattern", "weight": 3,
+        "states": {"none": "Uniform, no stripe", "single_pale_stripe": "Single pale longitudinal stripe",
+                   "reddish": "Reddish scutal markings", "metallic": "Metallic sheen"}},
+    "body_scaling": {"label": "General body scaling", "weight": 2,
+        "states": {"brown": "Ordinary brown", "sandy_pale": "Pale sandy", "ashy_grey": "Ashy grey",
+                   "cloudy_wing": "Cloudy-winged"}},
+    "leg_stripes": {"label": "Leg striping (predator cue)", "weight": 3,
+        "states": {"none": "None", "tiger_striped": "Boldly tiger-striped legs"}},
+    "habitat": {"label": "Larval habitat", "weight": 2,
+        "states": {"urban_container": "Urban / container", "floodwater": "Floodplain / flooded fields",
+                   "coastal_saline": "Coastal / brackish", "forest": "Forest / swamp margin",
+                   "highland": "Highland", "open_sunlit": "Open sunlit pools"}},
+    "body_size": {"label": "Body size", "weight": 1,
+        "states": {"small": "Small", "medium": "Medium", "large": "Large"}},
+}
+
+_PIPIENS_STATES = {"proboscis_band": "none", "tarsi_bands": "dark", "scutal_stripe": "none",
+                   "body_scaling": "brown", "leg_stripes": "none", "habitat": "urban_container",
+                   "body_size": "medium"}
+_DECENS_STATES = {"proboscis_band": "none", "tarsi_bands": "dark", "scutal_stripe": "none",
+                  "body_scaling": "brown", "habitat": "forest", "body_size": "medium"}
+
+CULEX_KEY_PROFILES = {
+    "Culex quinquefasciatus": {"resolution_level": "complex", "complex": "Culex pipiens complex",
+        "character_states": _PIPIENS_STATES, "discriminators": ["Pipiens complex — dissection/COI required"]},
+    "Culex pipiens": {"resolution_level": "complex", "complex": "Culex pipiens complex",
+        "character_states": _PIPIENS_STATES, "discriminators": ["Pipiens complex — hybridizes; molecular needed"]},
+    "Culex antennatus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "tarsi_bands": "pale_banded", "scutal_stripe": "none",
+            "body_scaling": "brown", "habitat": "floodwater", "body_size": "medium"},
+        "discriminators": ["Pale-banded tarsi + irrigated/flooded habitat"]},
+    "Culex poicilipes": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "tarsi_bands": "variegated_rings",
+            "habitat": "floodwater", "body_size": "medium"},
+        "discriminators": ["Variegated 'ringed' feet, savanna floodplain"]},
+    "Culex perfuscus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "tarsi_bands": "dark", "body_scaling": "brown",
+            "habitat": "forest", "body_size": "medium"},
+        "discriminators": ["Forest, dark unbanded legs (vs antennatus/poicilipes)"]},
+    "Culex univittatus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "one_median", "scutal_stripe": "single_pale_stripe",
+            "habitat": "open_sunlit", "body_size": "medium"},
+        "discriminators": ["Single pale scutal stripe, open sunlit water"]},
+    "Culex neavei": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "one_median", "scutal_stripe": "single_pale_stripe",
+            "habitat": "forest", "body_size": "medium"},
+        "discriminators": ["Mirrors univittatus; separate on wing/leg scale detail"]},
+    "Culex thalassius": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "one_median", "scutal_stripe": "single_pale_stripe",
+            "habitat": "coastal_saline", "body_size": "medium"},
+        "discriminators": ["Univittatus-like but coastal/brackish"]},
+    "Culex theileri": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "one_median", "tarsi_bands": "pale_banded",
+            "body_scaling": "sandy_pale", "body_size": "medium"},
+        "discriminators": ["Sandy pale body, arid livestock landscapes"]},
+    "Culex tritaeniorhynchus": {"resolution_level": "group", "complex": "Vishnui Subgroup",
+        "character_states": {"proboscis_band": "three_bands", "tarsi_bands": "pale_banded",
+            "habitat": "floodwater", "body_size": "medium"},
+        "discriminators": ["Triple-banded proboscis flags the subgroup; molecular to split"]},
+    "Culex bitaeniorhynchus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "two_bands", "habitat": "open_sunlit", "body_size": "medium"},
+        "discriminators": ["Two pale proboscis bands (name-diagnostic)"]},
+    "Culex sitiens": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "one_median", "tarsi_bands": "pale_banded",
+            "habitat": "coastal_saline", "body_size": "medium"},
+        "discriminators": ["Coastal/estuarine, pale-banded proboscis & tarsi"]},
+    "Culex annulioris": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "tarsi_bands": "pale_banded",
+            "habitat": "forest", "body_size": "medium"},
+        "discriminators": ["Boldly ringed legs, forest/swamp"]},
+    "Culex duttoni": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "tarsi_bands": "dark", "body_scaling": "brown",
+            "habitat": "urban_container", "body_size": "small"},
+        "discriminators": ["Small, dark, domestic container breeder"]},
+    "Culex nebulosus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "body_scaling": "cloudy_wing", "body_size": "medium"},
+        "discriminators": ["Cloudy-winged macroscopic appearance"]},
+    "Culex cinereus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "body_scaling": "ashy_grey", "body_size": "medium"},
+        "discriminators": ["Ashy-grey scaling, generalist breeder"]},
+    "Culex rubinotus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "scutal_stripe": "reddish", "body_size": "medium"},
+        "discriminators": ["Reddish scutal tint"]},
+    "Culex grahamii": {"resolution_level": "species", "complex": "None",
+        "character_states": {"proboscis_band": "none", "tarsi_bands": "dark", "body_scaling": "brown",
+            "body_size": "small"}, "discriminators": ["Tiny, unremarkable ground-pool breeder"]},
+    "Culex decens": {"resolution_level": "group", "complex": "Cx. decens group",
+        "character_states": _DECENS_STATES, "discriminators": ["Decens-group — record as group"]},
+    "Culex guiarti": {"resolution_level": "group", "complex": "Cx. decens group",
+        "character_states": _DECENS_STATES, "discriminators": ["Decens-group member"]},
+    "Culex trifilatus": {"resolution_level": "group", "complex": "Cx. decens group",
+        "character_states": _DECENS_STATES, "discriminators": ["Decens-group member"]},
+    "Culex invidiosus": {"resolution_level": "group", "complex": "Cx. decens group",
+        "character_states": _DECENS_STATES, "discriminators": ["Decens-group member"]},
+    "Culex tigripes": {"resolution_level": "species", "complex": "None",
+        "character_states": {"leg_stripes": "tiger_striped", "body_size": "large",
+            "proboscis_band": "none", "tarsi_bands": "pale_banded"},
+        "discriminators": ["BIOCONTROL: tiger-striped predator; harmless adult, larvivorous larva"]},
+}
+
+
+def identify_culex_species(observed_characters: dict) -> dict:
+    """Weighted character-agreement identifier for adult *Culex*.
+
+    Same guardrail as the Anopheles engine: the Culex pipiens complex, Vishnui
+    subgroup and Cx. decens group collapse to the group name with
+    molecular_id_required=True — never a bare member species.
+    """
+    return identify_by_characters(observed_characters, characters=CULEX_CHARACTERS,
+                                  profiles=CULEX_KEY_PROFILES,
+                                  species_index=_genus_species_index("Culex"),
+                                  genus_label="Culex")
+
+
+def get_culex_character_schema() -> list[dict]:
+    return [{"id": cid, "label": c["label"], "weight": c["weight"],
+             "states": [{"id": s, "label": lbl} for s, lbl in c["states"].items()]}
+            for cid, c in CULEX_CHARACTERS.items()]
+
+
+# ==========================================================================
+#  AEDES DEEP-KEY ENGINE
+# ==========================================================================
+AEDES_CHARACTERS = {
+    "scutal_pattern": {"label": "Scutal (thoracic) pattern", "weight": 4,
+        "states": {"lyre_shape": "Silver lyre-shaped pattern", "single_median_stripe": "Single bold silver median stripe",
+                   "narrow_median_stripe": "Narrow pale median stripe", "metallic_plain": "Plain metallic blue-black",
+                   "silver_spotted": "Discrete silver spots", "longitudinal_plus_lateral": "Median line + curved lateral lines",
+                   "nondescript": "Dull / nondescript"}},
+    "tarsi_bands": {"label": "Hind-tarsal pale banding", "weight": 3,
+        "states": {"broad_white_basal": "Broad basal white bands", "narrow_pale": "Narrow pale bands",
+                   "dark": "Entirely dark", "pale_banded": "Pale-banded (unspecified)"}},
+    "head_scales": {"label": "Head / vertex scaling", "weight": 3,
+        "states": {"pale_yellowish": "Distinctly pale / yellowish", "normal_dark": "Ordinary dark"}},
+    "apical_silver": {"label": "Apical silver scaling (wing/leg tips)", "weight": 2,
+        "states": {"present": "Concentrated at apex", "absent": "Not concentrated apically"}},
+    "habitat_form": {"label": "Breeding habitat / form", "weight": 2,
+        "states": {"container_urban": "Container / urban", "rock_pool": "Rock pool", "plant_axil": "Leaf / plant axil",
+                   "forest_canopy": "Forest canopy", "floodwater_dambo": "Floodwater / dambo", "coastal": "Coastal"}},
+    "body_size": {"label": "Body size", "weight": 1,
+        "states": {"small": "Small", "medium": "Medium", "large": "Large"}},
+}
+
+_SIMPSONI_STATES = {"scutal_pattern": "narrow_median_stripe", "tarsi_bands": "broad_white_basal",
+                    "head_scales": "normal_dark", "habitat_form": "plant_axil", "body_size": "medium"}
+_FURCIFER_STATES = {"scutal_pattern": "nondescript", "tarsi_bands": "broad_white_basal",
+                    "head_scales": "normal_dark", "habitat_form": "forest_canopy", "body_size": "medium"}
+_CABALLUS_STATES = {"scutal_pattern": "nondescript", "tarsi_bands": "pale_banded",
+                    "habitat_form": "floodwater_dambo", "body_size": "medium"}
+
+AEDES_KEY_PROFILES = {
+    "Aedes aegypti": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "lyre_shape", "tarsi_bands": "broad_white_basal",
+            "head_scales": "normal_dark", "habitat_form": "container_urban", "body_size": "medium"},
+        "discriminators": ["Silver lyre on scutum + white-banded tarsi", "domestic vs sylvatic forms via scale density"]},
+    "Aedes albopictus": {"resolution_level": "species", "complex": "None", "biosecurity_alert": True,
+        "character_states": {"scutal_pattern": "single_median_stripe", "tarsi_bands": "broad_white_basal",
+            "head_scales": "normal_dark", "habitat_form": "container_urban", "body_size": "medium"},
+        "discriminators": ["Single straight silver median stripe (vs aegypti lyre) — INVASIVE"]},
+    "Aedes africanus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "narrow_median_stripe", "tarsi_bands": "broad_white_basal",
+            "head_scales": "normal_dark", "habitat_form": "forest_canopy", "body_size": "medium"},
+        "discriminators": ["Narrow pale median stripe, broad basal tarsal bands, canopy YF vector"]},
+    "Aedes luteocephalus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"head_scales": "pale_yellowish", "tarsi_bands": "broad_white_basal",
+            "habitat_form": "forest_canopy", "body_size": "medium"},
+        "discriminators": ["Pale/yellowish head scaling (name-diagnostic)"]},
+    "Aedes metallicus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "metallic_plain", "head_scales": "normal_dark", "body_size": "medium"},
+        "discriminators": ["Unbroken metallic blue-black scutum"]},
+    "Aedes vittatus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "longitudinal_plus_lateral", "tarsi_bands": "broad_white_basal",
+            "habitat_form": "rock_pool", "body_size": "medium"},
+        "discriminators": ["Median + curved lateral silver lines, rock-pool breeder"]},
+    "Aedes apicoargenteus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"apical_silver": "present", "habitat_form": "forest_canopy", "body_size": "medium"},
+        "discriminators": ["Silver scaling clustered at wing/leg apex"]},
+    "Aedes argenteopunctatus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "silver_spotted", "habitat_form": "floodwater_dambo", "body_size": "medium"},
+        "discriminators": ["Discrete silver thoracic spots, floodwater RVF zones"]},
+    "Aedes unilineatus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "narrow_median_stripe", "tarsi_bands": "narrow_pale", "body_size": "small"},
+        "discriminators": ["Single fine dull line (weaker than albopictus stripe)"]},
+    "Aedes vexans": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "nondescript", "tarsi_bands": "narrow_pale",
+            "habitat_form": "floodwater_dambo", "body_size": "medium"},
+        "discriminators": ["Narrow pale tarsal rings, mass floodwater broods"]},
+    "Aedes mcintoshi": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "nondescript", "tarsi_bands": "pale_banded",
+            "habitat_form": "floodwater_dambo", "body_size": "medium"},
+        "discriminators": ["Dambo floodwater; desiccation-resistant soil eggs — RVF epidemic driver"]},
+    "Aedes ochraceus": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "nondescript", "tarsi_bands": "pale_banded",
+            "habitat_form": "floodwater_dambo", "body_size": "medium"},
+        "discriminators": ["Co-occurs with mcintoshi in dambos"]},
+    "Aedes fowleri": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "nondescript", "tarsi_bands": "pale_banded",
+            "habitat_form": "floodwater_dambo", "body_size": "medium"},
+        "discriminators": ["Arid-zone floodwater RVF vector"]},
+    "Aedes dalzieli": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "nondescript", "tarsi_bands": "pale_banded",
+            "habitat_form": "floodwater_dambo", "body_size": "medium"},
+        "discriminators": ["Savanna floodwater arbovirus vector"]},
+    "Aedes pembaensis": {"resolution_level": "species", "complex": "None",
+        "character_states": {"tarsi_bands": "broad_white_basal", "habitat_form": "coastal", "body_size": "medium"},
+        "discriminators": ["Coastal crab-hole breeder, broad tarsal bands"]},
+    "Aedes cumminsii": {"resolution_level": "species", "complex": "None",
+        "character_states": {"scutal_pattern": "nondescript", "tarsi_bands": "narrow_pale", "body_size": "medium"},
+        "discriminators": ["Dull savanna generalist, faint abdominal bands"]},
+    "Aedes furcifer": {"resolution_level": "group", "complex": "Ae. furcifer-taylori group",
+        "character_states": _FURCIFER_STATES, "discriminators": ["Furcifer-taylori group — separate via genitalia"]},
+    "Aedes taylori": {"resolution_level": "group", "complex": "Ae. furcifer-taylori group",
+        "character_states": _FURCIFER_STATES, "discriminators": ["Furcifer-taylori group — log as group"]},
+    "Aedes simpsoni (s.l.)": {"resolution_level": "complex", "complex": "Aedes simpsoni complex",
+        "character_states": _SIMPSONI_STATES, "discriminators": ["Simpsoni complex — PCR required"]},
+    "Aedes bromeliae": {"resolution_level": "complex", "complex": "Aedes simpsoni complex",
+        "character_states": _SIMPSONI_STATES, "discriminators": ["Anthropophilic YF bridge vector, but morphologically cryptic — PCR"]},
+    "Aedes lilii": {"resolution_level": "complex", "complex": "Aedes simpsoni complex",
+        "character_states": _SIMPSONI_STATES, "discriminators": ["Simpsoni complex — PCR required"]},
+    "Aedes caballus": {"resolution_level": "group", "complex": "Ae. caballus-juppi pair",
+        "character_states": _CABALLUS_STATES, "discriminators": ["Caballus/juppi sibling pair — molecular needed"]},
+    "Aedes juppi": {"resolution_level": "group", "complex": "Ae. caballus-juppi pair",
+        "character_states": _CABALLUS_STATES, "discriminators": ["Caballus/juppi sibling pair — molecular needed"]},
+}
+
+
+def identify_aedes_species(observed_characters: dict) -> dict:
+    """Weighted character-agreement identifier for adult *Aedes*.
+
+    Enforces the cryptic ceiling: the Ae. simpsoni complex, furcifer-taylori
+    group and caballus-juppi pair collapse to the group name (PCR-flagged);
+    genuinely diagnostic species (aegypti, albopictus …) resolve to species.
+    """
+    return identify_by_characters(observed_characters, characters=AEDES_CHARACTERS,
+                                  profiles=AEDES_KEY_PROFILES,
+                                  species_index=_genus_species_index("Aedes"),
+                                  genus_label="Aedes")
+
+
+def get_aedes_character_schema() -> list[dict]:
+    return [{"id": cid, "label": c["label"], "weight": c["weight"],
+             "states": [{"id": s, "label": lbl} for s, lbl in c["states"].items()]}
+            for cid, c in AEDES_CHARACTERS.items()]
+
+
+# ==========================================================================
+#  LARVAL 4th-INSTAR DEEP-KEY (resolves to GENUS only, honestly)
+# ==========================================================================
+LARVAL_CHARACTERS = {
+    "siphon": {"label": "Respiratory siphon", "weight": 4,
+        "states": {"absent": "Absent (spiracular plate flush with surface)",
+                   "short_stout": "Short & stout", "long_slender": "Long & slender"}},
+    "float_hairs": {"label": "Abdominal palmate (float) hairs", "weight": 4,
+        "states": {"palmate_present": "Palmate float hairs present", "absent": "Absent"}},
+    "posture": {"label": "Resting posture", "weight": 3,
+        "states": {"parallel": "Parallel/horizontal to surface film", "angled": "Head-down at an angle"}},
+    "pecten_subventral_tufts": {"label": "Siphon subventral setal tufts", "weight": 2,
+        "states": {"multiple_tufts": "Several tufts along siphon", "single_pair": "One pair only", "none": "None"}},
+    "comb_scales": {"label": "Abdominal segment VIII comb", "weight": 2,
+        "states": {"single_row": "Single row", "patch": "Patch/triangle", "absent": "Absent"}},
+    "predator_habitus": {"label": "Predatory habitus", "weight": 2,
+        "states": {"large_striped_predator": "Large, boldly striped, actively predatory", "normal": "Ordinary filter feeder"}},
+}
+
+
+def evaluate_larval_deepkey(observed: dict) -> dict:
+    """Resolve a 4th-instar larva to GENUS with a per-character audit, plus a
+    Culex tigripes predator flag. Never claims species — wild larval species ID
+    needs chaetotaxy slides or molecular assays."""
+    o = observed or {}
+    siphon = o.get("siphon")
+    floats = o.get("float_hairs")
+    posture = o.get("posture")
+    predator = o.get("predator_habitus")
+
+    # Anopheline signature: no siphon + palmate float hairs + parallel posture
+    if siphon == "absent" or floats == "palmate_present" or posture == "parallel":
+        return {"resolved_genus": "Anopheles", "resolution_level": "genus",
+                "confidence_tier": "High-confidence genus triage",
+                "notes": ("Anopheline larva (no siphon, palmate float hairs, lies parallel). "
+                          "Cryptic complexes make species-level calls invalid on wild larvae without "
+                          "chaetotaxy slide counts or molecular assays."),
+                "next_step": "For gambiae/funestus-group localities, rear to adult or PCR for species."}
+
+    predator_flag = (predator == "large_striped_predator")
+    if siphon == "long_slender" or o.get("pecten_subventral_tufts") == "multiple_tufts":
+        note = "Culicine (Culex) larva: long slender siphon with several subventral setal tufts."
+        if predator_flag:
+            note = ("Large, boldly striped predatory culicine larva — evaluate for Culex tigripes, "
+                    "a larvivorous BIOCONTROL indicator, not a vector.")
+        return {"resolved_genus": "Culex", "resolution_level": "genus",
+                "confidence_tier": "High-confidence genus triage",
+                "biocontrol_candidate": predator_flag, "notes": note,
+                "next_step": "Species needs male genitalia or COI; flag tigripes as beneficial if predatory."}
+
+    if siphon == "short_stout":
+        return {"resolved_genus": "Aedes", "resolution_level": "genus",
+                "confidence_tier": "High-confidence genus triage",
+                "notes": ("Aedine larva: short stout siphon, typically one pair of subventral tufts, "
+                          "comb scales in a row/patch. Container or floodwater habitats."),
+                "next_step": "Species needs reared adults or molecular confirmation."}
+
+    return {"resolved_genus": "Undetermined Culicinae", "resolution_level": "undetermined",
+            "confidence_tier": "Inconclusive",
+            "notes": "Characters do not line up with standard 4th-instar keys; re-examine under magnification.",
+            "next_step": "Record siphon form, palmate hairs and posture."}
+
+
+def get_larval_character_schema() -> list[dict]:
+    return [{"id": cid, "label": c["label"], "weight": c["weight"],
+             "states": [{"id": s, "label": lbl} for s, lbl in c["states"].items()]}
+            for cid, c in LARVAL_CHARACTERS.items()]
 
