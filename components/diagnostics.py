@@ -420,15 +420,19 @@ def _render_anopheles_deep_key(target: str | None = None):
                 _render_anopheles_identification(res)
 
                 if res.get("resolution_level") not in ("undetermined", "genus"):
+                    eco = _render_ecological_estimate(res.get("taxon"), "anoph_char")
+                    saved = {
+                        "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
+                        "anopheles_deep_key": res,
+                    }
+                    if eco:
+                        saved["ecological_estimate"] = eco
                     st.markdown("---")
                     _save_identification(
                         "💾 Save this Anopheles result",
                         "save_anoph_char",
                         "manual_checklist",
-                        {
-                            "genus_triage": {"genus": "Anopheles", "confidence": res.get("confidence", 0)},
-                            "anopheles_deep_key": res,
-                        },
+                        saved,
                         target,
                         result_key="anoph_char_result",
                     )
@@ -460,14 +464,15 @@ def _render_anopheles_deep_key(target: str | None = None):
     terminal = st.session_state["anoph_key_terminal"]
     if terminal:
         _render_key_terminal(terminal)
+        eco = _render_ecological_estimate(terminal.get("taxon"), "anoph_key")
+        saved = {"genus_triage": {"genus": "Anopheles"}, "anopheles_couplet_key": terminal}
+        if eco:
+            saved["ecological_estimate"] = eco
         _save_identification(
             "💾 Save this key result",
             "save_anoph_key",
             "manual_checklist",
-            {
-                "genus_triage": {"genus": "Anopheles"},
-                "anopheles_couplet_key": terminal,
-            },
+            saved,
             target,
         )
         st.info("Click **↺ Restart key** to identify another specimen.")
@@ -887,12 +892,16 @@ def _render_single_photo_screening(target: str | None) -> None:
             _render_vision_result(result, is_larval=False)
 
             if "error" not in result:
+                eco = _render_ecological_estimate(result.get("best_match"), "vision_adult")
+                save_result = dict(result)
+                if eco:
+                    save_result["ecological_estimate"] = eco
                 st.markdown("---")
                 _save_identification(
                     "💾 Save this AI screening result",
                     "save_vision_adult",
                     "ai_vision",
-                    result,
+                    save_result,
                     target,
                     photos=[uploaded_adult],
                 )
@@ -950,17 +959,19 @@ def _pretty_member(name: str) -> str:
     return name.replace("_ss", " s.s.").replace("_", " ")
 
 
-def _render_ecological_estimate(result: dict, key_prefix: str) -> dict | None:
-    """Optional ecological-context panel for a COMPLEX-level result.
+def _render_ecological_estimate(taxon: str | None, key_prefix: str) -> dict | None:
+    """Optional ecological-context panel for a COMPLEX-level ``taxon``.
 
+    Shared by every path that can produce a cryptic complex — the trained
+    classifier, the Anopheles character scorer and couplet key, and AI vision.
     Returns the computed estimate dict (so a caller can fold it into a saved
     record), or None when it doesn't apply or hasn't been run. Purely advisory:
     it estimates the likely complex *member* from where/when the specimen was
     collected and NEVER changes the complex verdict — PCR is still the only
-    definitive split. Renders nothing for species/genus results or complexes the
+    definitive split. Renders nothing for species/genus taxa or complexes the
     estimator has no rules for.
     """
-    complex_name = complex_for_taxon(result.get("predicted_species"))
+    complex_name = complex_for_taxon(taxon)
     if not complex_name:
         return None
 
@@ -1068,7 +1079,7 @@ def _render_classifier_screening(target: str | None) -> None:
                 # Complex-level results can carry an optional ecological estimate of
                 # the likely member; it's stored as provenance and never alters the
                 # complex verdict (predicted_species / resolution_level are untouched).
-                eco = _render_ecological_estimate(result, "clf")
+                eco = _render_ecological_estimate(result.get("predicted_species"), "clf")
                 save_result = dict(result)
                 if eco:
                     save_result["ecological_estimate"] = eco
@@ -1159,11 +1170,16 @@ def _render_multi_angle_screening(target: str | None) -> None:
                 "and prefer PCR confirmation."
             )
 
+        chosen = results[chosen_angle]
+        eco = _render_ecological_estimate(chosen.get("best_match"), "vision_adult_multi")
+        save_result = dict(chosen)
+        if eco:
+            save_result["ecological_estimate"] = eco
         _save_identification(
             "💾 Save this AI screening result",
             "save_vision_adult_multi",
             "ai_vision",
-            results[chosen_angle],
+            save_result,
             target,
             photos=list(uploads.values()),
         )
