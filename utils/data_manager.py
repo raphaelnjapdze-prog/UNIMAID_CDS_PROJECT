@@ -645,6 +645,24 @@ def specimens_ready_for_pcr(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _clean_label_part(value) -> str:
+    """Coerce a DataFrame-record value into a clean label string.
+
+    DataFrame.to_dict("records") renders a missing cell as float NaN (dates as
+    NaT), both truthy — so callers can't just test `if value`. Returns "" for
+    missing/NaN, else the stripped string form. Never raises: label building must
+    not take a page down.
+    """
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
 def pcr_specimen_label(row: dict) -> str:
     """Human-readable option label for the PCR specimen picker.
 
@@ -653,12 +671,17 @@ def pcr_specimen_label(row: dict) -> str:
     """
     screening = _as_screening_dict(row.get("field_screening_result"))
     genus = extract_primary_genus(screening) or "undetermined"
-    tube = row.get("tube_label")
-    date = row.get("collection_date") or "undated"
+    # A row from DataFrame.to_dict("records") carries a missing tube_label / date as a
+    # float NaN, which is truthy — so `[tube] if tube else []` kept the NaN and
+    # " · ".join() then blew up ("expected str instance, float found"). An identified
+    # specimen that was never vialed out has no tube_label at all, so this is the
+    # common case, not an edge one. Coerce every part to a clean string.
+    tube = _clean_label_part(row.get("tube_label"))
+    date = _clean_label_part(row.get("collection_date")) or "undated"
     short_id = str(row.get("specimen_id") or "")[:8]
 
     parts = [tube] if tube else []
-    parts += [genus, str(date), f"{short_id}…"]
+    parts += [str(genus), date, f"{short_id}…"]
     prefix = "✔ " if (row.get("pcr_status") == "confirmed") else ""
     return prefix + " · ".join(parts)
 
