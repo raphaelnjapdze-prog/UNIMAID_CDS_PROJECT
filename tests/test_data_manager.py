@@ -4,6 +4,7 @@ These cover the deterministic functions that surveillance/reporting depend on:
 genus resolution from stored screening results and the WHO bioassay math.
 """
 
+import pandas as pd
 import pytest
 
 from utils.data_manager import (
@@ -12,6 +13,7 @@ from utils.data_manager import (
     compute_mortality_percentage,
     extract_genus_counts_from_screening,
     extract_primary_genus,
+    pcr_specimen_label,
 )
 
 
@@ -111,3 +113,63 @@ class TestResistanceClassification:
 
     def test_none_is_unknown(self):
         assert classify_resistance_status(None) == "Unknown"
+
+
+class TestPcrSpecimenLabel:
+    """The PCR picker builds each option label from a DataFrame record. A missing
+    tube_label comes back as float NaN (truthy), which used to crash the join
+    with 'expected str instance, float found' — every identified-but-not-vialed
+    specimen hit this."""
+
+    def _row(self, **over):
+        base = {
+            "field_screening_result": {
+                "screening_method": "trained_classifier",
+                "result": {"genus": "Anopheles", "predicted_species": "Anopheles gambiae complex",
+                           "resolution_level": "complex"},
+            },
+            "specimen_id": "abcd1234-5678-90ab",
+            "collection_date": "2026-07-20",
+            "tube_label": "VS-01",
+            "pcr_status": "not_submitted",
+        }
+        base.update(over)
+        return base
+
+    def test_includes_tube_genus_and_id(self):
+        label = pcr_specimen_label(self._row())
+        assert "VS-01" in label
+        assert "Anopheles" in label
+        assert "abcd1234" in label
+
+    def test_missing_tube_label_nan_does_not_crash(self):
+        label = pcr_specimen_label(self._row(tube_label=float("nan")))
+        assert isinstance(label, str)
+        assert "nan" not in label.lower()   # the NaN is dropped, not rendered
+        assert "Anopheles" in label
+
+    def test_dataframe_roundtrip_with_missing_tube(self):
+        # Faithful reproduction: records with differing keys -> the row lacking
+        # tube_label gets float NaN after DataFrame.to_dict("records").
+        df = pd.DataFrame([
+            {"specimen_id": "has-tube-000", "tube_label": "VS-9", "collection_date": "2026-07-20",
+             "pcr_status": "not_submitted",
+             "field_screening_result": {"screening_method": "ai_vision",
+                                        "result": {"genus": "Culex", "best_match": "Culex pipiens complex"}}},
+            {"specimen_id": "no-tube-00000", "collection_date": "2026-07-20",
+             "pcr_status": "not_submitted",
+             "field_screening_result": {"screening_method": "ai_vision",
+                                        "result": {"genus": "Culex", "best_match": "Culex pipiens complex"}}},
+        ])
+        row = df.to_dict("records")[1]
+        label = pcr_specimen_label(row)  # must not raise
+        assert isinstance(label, str)
+        assert "Culex" in label
+        assert "nan" not in label.lower()
+
+    def test_confirmed_gets_check_prefix(self):
+        assert pcr_specimen_label(self._row(pcr_status="confirmed")).startswith("✔")
+
+    def test_nan_date_falls_back_to_undated(self):
+        label = pcr_specimen_label(self._row(collection_date=float("nan"), tube_label=None))
+        assert "undated" in label
