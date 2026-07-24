@@ -2,7 +2,10 @@
 # AUTHENTICATION & DATABASE CORE UTILITIES (utils/auth.py)
 # =========================================================================
 import base64
+import hashlib
+import hmac
 import json
+import secrets
 import socket
 import time
 from datetime import datetime
@@ -12,6 +15,7 @@ import streamlit as st
 from utils.config import (
     ADMIN_EMAIL,
     ADMIN_PASSWORD,
+    ADMIN_PASSWORD_HASH,
     ADMIN_USERNAME,
     get_base_supabase_client,
     get_service_supabase_client,
@@ -183,6 +187,65 @@ def set_authenticated(user, provider="supabase"):
     st.session_state["login_time"] = datetime.now()
 
 
+# --- LOCAL-ADMIN PASSWORD HASHING ------------------------------------------
+# Format: "pbkdf2_sha256$<iterations>$<salt_hex>$<hash_hex>" — self-describing,
+# so the iteration count and salt travel with the digest and can be bumped
+# later without breaking existing hashes. Generate one with
+# scripts/hash_admin_password.py and store it as ADMIN_PASSWORD_HASH.
+_PBKDF2_ALGORITHM = "pbkdf2_sha256"
+_PBKDF2_DEFAULT_ITERATIONS = 240_000
+
+
+def hash_admin_password(password: str, *, iterations: int = _PBKDF2_DEFAULT_ITERATIONS,
+                        salt: bytes | None = None) -> str:
+    """Derive a PBKDF2-SHA256 digest string for ``password``.
+
+    A fresh random salt is generated unless one is supplied (tests pin it). The
+    returned string is what belongs in the ADMIN_PASSWORD_HASH secret.
+    """
+    if salt is None:
+        salt = secrets.token_bytes(16)
+    derived = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return f"{_PBKDF2_ALGORITHM}${iterations}${salt.hex()}${derived.hex()}"
+
+
+def _verify_pbkdf2(submitted: str, encoded: str) -> bool:
+    """Constant-time check of ``submitted`` against an encoded PBKDF2 digest."""
+    try:
+        algorithm, iterations_s, salt_hex, hash_hex = encoded.split("$")
+        iterations = int(iterations_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except (ValueError, AttributeError):
+        # A malformed hash must never authenticate anyone — and it means the
+        # deployment is misconfigured, so surface it rather than silently deny.
+        logger.warning("ADMIN_PASSWORD_HASH is malformed; local-admin login disabled.")
+        return False
+    if algorithm != _PBKDF2_ALGORITHM:
+        logger.warning("ADMIN_PASSWORD_HASH uses unsupported algorithm %r; login disabled.",
+                       algorithm)
+        return False
+    derived = hashlib.pbkdf2_hmac("sha256", submitted.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(derived, expected)
+
+
+def _verify_admin_password(submitted: str) -> bool:
+    """Return True only if ``submitted`` matches the configured admin credential.
+
+    Prefers the PBKDF2 hash (ADMIN_PASSWORD_HASH); falls back to a constant-time
+    comparison against the legacy plaintext ADMIN_PASSWORD. Both comparisons use
+    hmac.compare_digest so a wrong guess can't be narrowed down by timing. If
+    neither credential is configured, the fallback login is disabled entirely.
+    """
+    if not submitted:
+        return False
+    if ADMIN_PASSWORD_HASH:
+        return _verify_pbkdf2(submitted, ADMIN_PASSWORD_HASH)
+    if ADMIN_PASSWORD:
+        return hmac.compare_digest(submitted, ADMIN_PASSWORD)
+    return False
+
+
 def sign_in_user(email: str, password: str):
     """
     Signs in against Supabase and stores the resulting session tokens in
@@ -222,8 +285,9 @@ def sign_in_user(email: str, password: str):
 
         return auth_response
 
-    # Local fallback login is only available when an admin password has been
-    # configured via secrets/env. Without it, there is no offline bypass.
+    # Local fallback login is only available when an admin credential (hash or
+    # plaintext) has been configured via secrets/env. Without it, there is no
+    # offline bypass — _verify_admin_password() returns False.
     #
     # ADMIN_USERNAME/ADMIN_EMAIL come from secrets and may be unset. Calling .lower() on
     # an unset one raised AttributeError mid-login; worse, coercing it to "" would let a
@@ -235,9 +299,8 @@ def sign_in_user(email: str, password: str):
         if identity and identity.strip()
     }
     if (
-        ADMIN_PASSWORD
-        and password == ADMIN_PASSWORD
-        and email.strip().lower() in admin_identities
+        email.strip().lower() in admin_identities
+        and _verify_admin_password(password)
     ):
         return {"user": {"email": ADMIN_EMAIL, "id": "local-admin", "user_metadata": {"full_name": "Administrator"}}}
     return None
