@@ -1,16 +1,19 @@
 """Tests for the local-admin authentication fallback in utils.auth.
 
 The security-critical property: the offline admin login exists only when an
-admin password is configured, and never accepts an empty/omitted password.
+admin credential is configured, and never accepts an empty/omitted password.
+Credentials may be a PBKDF2 hash (ADMIN_PASSWORD_HASH, preferred) or a legacy
+plaintext ADMIN_PASSWORD; both are compared in constant time.
 """
 
 import utils.auth as auth
 
 
-def _patch_admin(monkeypatch, password):
+def _patch_admin(monkeypatch, password, password_hash=None):
     monkeypatch.setattr(auth, "ADMIN_USERNAME", "admin")
     monkeypatch.setattr(auth, "ADMIN_EMAIL", "admin@localhost")
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", password)
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD_HASH", password_hash)
     # Force the Supabase path off so we exercise the local fallback.
     monkeypatch.setattr(auth, "get_base_supabase_client", lambda: None)
 
@@ -52,8 +55,51 @@ def test_unset_admin_identity_matches_nothing(monkeypatch):
     monkeypatch.setattr(auth, "ADMIN_USERNAME", None)
     monkeypatch.setattr(auth, "ADMIN_EMAIL", None)
     monkeypatch.setattr(auth, "ADMIN_PASSWORD", "secret")
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD_HASH", None)
     monkeypatch.setattr(auth, "get_base_supabase_client", lambda: None)
 
     assert auth.sign_in_user("", "secret") is None
     assert auth.sign_in_user("   ", "secret") is None
     assert auth.sign_in_user("admin", "secret") is None
+
+
+# --- PBKDF2 hash path -------------------------------------------------------
+
+def test_hash_login_succeeds(monkeypatch):
+    """A password matching ADMIN_PASSWORD_HASH authenticates, with no plaintext set."""
+    digest = auth.hash_admin_password("secret")
+    _patch_admin(monkeypatch, None, password_hash=digest)
+    result = auth.sign_in_user("admin", "secret")
+    assert isinstance(result, dict)
+    assert result["user"]["email"] == "admin@localhost"
+
+
+def test_hash_login_wrong_password_rejected(monkeypatch):
+    digest = auth.hash_admin_password("secret")
+    _patch_admin(monkeypatch, None, password_hash=digest)
+    assert auth.sign_in_user("admin", "wrong") is None
+    assert auth.sign_in_user("admin", "") is None
+
+
+def test_hash_takes_precedence_over_plaintext(monkeypatch):
+    """When both are set the hash wins; the stale plaintext must not authenticate."""
+    digest = auth.hash_admin_password("hashed-secret")
+    _patch_admin(monkeypatch, "plaintext-secret", password_hash=digest)
+    assert auth.sign_in_user("admin", "hashed-secret") is not None
+    assert auth.sign_in_user("admin", "plaintext-secret") is None
+
+
+def test_malformed_hash_authenticates_nobody(monkeypatch):
+    _patch_admin(monkeypatch, None, password_hash="not-a-valid-hash")
+    assert auth.sign_in_user("admin", "secret") is None
+    assert auth.sign_in_user("admin", "not-a-valid-hash") is None
+
+
+def test_hash_roundtrip_verifies():
+    """hash_admin_password output is verifiable and salted (two calls differ)."""
+    a = auth.hash_admin_password("pw")
+    b = auth.hash_admin_password("pw")
+    assert a != b  # random per-call salt
+    assert a.startswith("pbkdf2_sha256$")
+    assert auth._verify_pbkdf2("pw", a) is True
+    assert auth._verify_pbkdf2("nope", a) is False
