@@ -126,6 +126,21 @@ Secrets are read from `.streamlit/secrets.toml` first, then environment variable
 > **Honest degradation is a hard design rule.** If Supabase isn't configured, data functions return
 > empty/"not connected" states — the app **never** substitutes fabricated data for a missing backend.
 
+### Database migrations
+
+The files in `sql/` are applied by hand in the Supabase SQL Editor. `create_specimen_records.sql`
+builds the central table; the rest are additive and safe to re-run. Run
+`add_update_policies.sql` and `add_delete_policies.sql` on any existing database — without
+the matching row-level-security policies, updates and deletes match zero rows *without
+raising*, so they silently do nothing.
+
+### Clearing trial data
+
+Deleting entries between trial runs is documented in
+**[docs/DELETING_ENTRIES.md](docs/DELETING_ENTRIES.md)** — per-entry deletion from the Site
+Log, the bulk reset in Profile → Danger Zone, and what travels with a deleted specimen
+(its photos, its vialed-out individuals, and its batch's tally).
+
 ## Development
 
 ```bash

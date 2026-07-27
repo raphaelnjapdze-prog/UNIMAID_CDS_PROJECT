@@ -513,6 +513,24 @@ def _as_screening_dict(field_screening_result) -> dict:
     return field_screening_result if isinstance(field_screening_result, dict) else {}
 
 
+def subsampled_genus_of(field_screening_result) -> str | None:
+    """The genus a vialed-out individual was subsampled as, or None if the row isn't one.
+
+    Read this rather than the row's current genus. An identification overwrites the
+    child's field_screening_result, so the pile it came out of is only recoverable from
+    the "field_subsample" result while it is still pending, and from the
+    "subsampled_genus" key that attach_identification_to_specimen carries forward after.
+    Both the identification path and the delete path need that original genus — the
+    batch's vialed_out tally is keyed by it — so it is read in exactly one place.
+    """
+    screening = _as_screening_dict(field_screening_result)
+    if screening.get("screening_method") == "field_subsample":
+        genus = (screening.get("result") or {}).get("genus")
+    else:
+        genus = screening.get("subsampled_genus")
+    return genus or None
+
+
 def summarise_vialed_child(row: dict) -> dict:
     """One vialed-out individual, described for display under its parent batch."""
     screening = _as_screening_dict(row.get("field_screening_result"))
@@ -766,11 +784,7 @@ def attach_identification_to_specimen(
     # nothing and a real, caught mosquito would vanish from the totals. The genus is known
     # from the pile it was vialed out of; keep it as the floor that aggregation falls back
     # to. Re-identifying an already-identified child preserves it via the second branch.
-    subsampled_genus = None
-    if prior.get("screening_method") == "field_subsample":
-        subsampled_genus = (prior.get("result") or {}).get("genus")
-    elif prior.get("subsampled_genus"):
-        subsampled_genus = prior["subsampled_genus"]
+    subsampled_genus = subsampled_genus_of(prior)
 
     # Who identified this specimen, which is not necessarily who collected it: the row's
     # collector_id belongs to whoever logged the batch it was vialed out of, and that
@@ -848,6 +862,415 @@ def load_specimen_records() -> pd.DataFrame:
 def clear_specimen_records_cache():
     """Call after any write, so the next load_specimen_records() reflects it."""
     load_specimen_records.clear()
+
+
+# =============================================================================
+# DELETION — removing trial/demo entries so a clean run can start
+# =============================================================================
+# Deleting a specimen row is not just a DELETE. Three things travel with it:
+#
+#   1. Its photos live in the specimen-photos Storage bucket, not in the row. Dropping
+#      the row alone orphans the objects (they keep counting against storage and stay
+#      publicly reachable by URL); deleting the objects alone leaves the row pointing at
+#      dead URLs, which is the state this cleanup was built to get out of.
+#   2. A batch's vialed-out children reference it via parent_specimen_id, declared
+#      "on delete set null" — so deleting a batch does not remove them, it silently
+#      detaches them into individuals whose collection event no longer exists. They have
+#      to be deleted with the batch, explicitly.
+#   3. Deleting a child alone must give its specimen back to the batch. The batch reports
+#      raw − vialed_out, so a child that disappears without its tally being decremented
+#      takes a real, caught mosquito out of every total. See the no-double-count invariant
+#      in CLAUDE.md; the same conservation property applies in reverse.
+#
+# And as with every write here, RLS makes a DELETE with no matching policy match zero
+# rows *without raising* (see sql/add_update_policies.sql). Nothing below reports success
+# it has not verified against the rows the database actually returned.
+_PHOTO_BUCKET = "specimen-photos"
+
+# Supabase caps the URL length, and `in_(...)` puts every id in the query string.
+_DELETE_CHUNK = 80
+
+
+def _chunked(items: list, size: int = _DELETE_CHUNK):
+    for start in range(0, len(items), size):
+        yield items[start:start + size]
+
+
+def _storage_path_from_public_url(url: str) -> str | None:
+    """The object's path inside the bucket, parsed out of the public URL stored on the row.
+
+    Storage takes bucket-relative paths, but the row only ever keeps the full public URL
+    that get_public_url() handed back:
+    ".../object/public/specimen-photos/<specimen_id>/<uuid>.jpg". Anything not shaped like
+    that (a hand-edited row, a URL from another bucket) yields None and is left alone
+    rather than guessed at.
+    """
+    if not isinstance(url, str):
+        return None
+    marker = f"/{_PHOTO_BUCKET}/"
+    _, _, tail = url.partition(marker)
+    path = tail.split("?", 1)[0].strip().strip("/")
+    return path or None
+
+
+def delete_specimen_photos(photo_urls) -> int:
+    """Remove a row's photos from the specimen-photos bucket. Returns how many were
+    removed. Best-effort by design: a failed object delete is logged and reported, but
+    must not block deleting the row, or an unreachable bucket would make the ledger
+    impossible to clean up."""
+    client = get_supabase_client()
+    if client is None or not photo_urls:
+        return 0
+
+    paths = [p for url in photo_urls if (p := _storage_path_from_public_url(url))]
+    if not paths:
+        return 0
+
+    removed = 0
+    for chunk in _chunked(paths):
+        try:
+            client.storage.from_(_PHOTO_BUCKET).remove(chunk)
+            removed += len(chunk)
+        except Exception:
+            logger.warning(
+                "Could not remove %d photo object(s) from %s; the rows will still be "
+                "deleted and the objects left behind", len(chunk), _PHOTO_BUCKET,
+                exc_info=True,
+            )
+    return removed
+
+
+def _fetch_rows_by_id(specimen_ids: list[str]) -> list[dict]:
+    client = get_supabase_client()
+    if client is None:
+        return []
+    rows: list[dict] = []
+    for chunk in _chunked(specimen_ids):
+        try:
+            response = (
+                client.table("specimen_records").select("*").in_("specimen_id", chunk).execute()
+            )
+        except Exception:
+            logger.exception("Could not load specimen rows selected for deletion")
+            return []
+        rows.extend(response_rows(response))
+    return rows
+
+
+def _fetch_children_of(batch_ids: list[str]) -> list[dict]:
+    client = get_supabase_client()
+    if client is None or not batch_ids:
+        return []
+    rows: list[dict] = []
+    for chunk in _chunked(batch_ids):
+        try:
+            response = (
+                client.table("specimen_records").select("*")
+                .in_("parent_specimen_id", chunk).execute()
+            )
+        except Exception:
+            logger.exception("Could not load vialed-out children of the batches being deleted")
+            return []
+        rows.extend(response_rows(response))
+    return rows
+
+
+def _restore_vialed_out(parent_id: str, genus_counts: dict) -> bool:
+    """Give deleted children back to their batch by decrementing its vialed_out tally.
+
+    The batch reports raw − vialed_out, so this is what keeps the collection event's
+    total intact when an individual is deleted: the specimen stops being tracked on its
+    own and becomes available to vial again. Returns False if the batch could not be
+    updated, so the caller can say so instead of implying the totals are consistent.
+    """
+    client = get_supabase_client()
+    if client is None:
+        return False
+    try:
+        response = (
+            client.table("specimen_records").select("field_screening_result")
+            .eq("specimen_id", parent_id).execute()
+        )
+    except Exception:
+        logger.exception("Could not load batch %s to restore its vialed_out tally", parent_id)
+        return False
+
+    parent = first_row(response)
+    if parent is None:
+        # The batch is gone (deleted in an earlier pass, or by someone else). There is no
+        # tally left to correct and nothing was lost — the children went with it.
+        return True
+
+    screening = _as_screening_dict(parent.get("field_screening_result"))
+    if screening.get("screening_method") != "manual_field_log":
+        logger.warning("Parent %s is not a field-count log; no tally to restore", parent_id)
+        return False
+
+    result = dict(screening.get("result") or {})
+    vialed = dict(result.get("vialed_out") or {})
+    for genus, count in genus_counts.items():
+        vialed[genus] = max(0, int(vialed.get(genus, 0) or 0) - int(count))
+    result["vialed_out"] = vialed
+    updated_screening = {**screening, "result": result}
+
+    try:
+        update_response = (
+            client.table("specimen_records")
+            .update({"field_screening_result": updated_screening})
+            .eq("specimen_id", parent_id).execute()
+        )
+    except Exception:
+        logger.exception("Could not restore vialed_out tally on batch %s", parent_id)
+        return False
+
+    # An UPDATE no RLS policy permits matches zero rows without raising.
+    if first_row(update_response) is None:
+        logger.error("Tally restore on batch %s matched no rows — check UPDATE policy", parent_id)
+        return False
+    return True
+
+
+def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict | None:
+    """Delete specimen rows, their photos, and any individuals vialed out of them.
+
+    Returns a summary dict, or None if nothing could be deleted (Supabase not
+    configured, no valid ids, or the database refused the delete). Never reports a
+    deletion it did not verify.
+
+    The summary's keys:
+      requested          ids passed in that matched a real row
+      deleted            rows actually removed, as counted by the database
+      cascaded_children  vialed-out individuals removed along with their batch
+      photos_removed     storage objects deleted
+      batches_restored   {batch_id: {genus: count}} tallies decremented
+      tally_failures     batch ids whose tally could NOT be corrected — their totals
+                         are now short by the deleted children, and the caller must
+                         surface this rather than swallow it
+    """
+    client = get_supabase_client()
+    if client is None:
+        st.error("Supabase is not configured — nothing can be deleted.")
+        return None
+
+    wanted = list(dict.fromkeys(str(sid).strip() for sid in (specimen_ids or []) if str(sid).strip()))
+    if not wanted:
+        st.error("No entries were selected for deletion.")
+        return None
+
+    rows = _fetch_rows_by_id(wanted)
+    if not rows:
+        st.error(
+            "None of the selected entries could be read back, so nothing was deleted. "
+            "They may already be gone, or hidden from this account by row-level security."
+        )
+        return None
+
+    # Cascade: a batch's children must go with it. parent_specimen_id is declared
+    # "on delete set null", so leaving them would detach them into individuals whose
+    # collection event no longer exists rather than remove them.
+    doomed = {row["specimen_id"]: row for row in rows if row.get("specimen_id")}
+    batch_ids = [
+        sid for sid, row in doomed.items()
+        if _as_screening_dict(row.get("field_screening_result")).get("screening_method") == "manual_field_log"
+    ]
+    for child in _fetch_children_of(batch_ids):
+        child_id = child.get("specimen_id")
+        if child_id and child_id not in doomed:
+            doomed[child_id] = child
+
+    # Delete first, correct the tallies second. The realistic failure here is a missing
+    # RLS policy, which blocks the delete outright — decrementing before that would hand
+    # the batch specimens back while their child rows still existed, which is the
+    # double-count subsampling exists to prevent. An undercount after a delete the user
+    # asked for is the safer way to fail, and it is reported rather than hidden.
+    deleted_ids: list[str] = []
+    ids = list(doomed.keys())
+    for chunk in _chunked(ids):
+        try:
+            response = (
+                client.table("specimen_records").delete().in_("specimen_id", chunk).execute()
+            )
+        except Exception as e:
+            logger.exception("Delete of specimen rows failed")
+            st.error(f"Could not delete the selected entries: {e}")
+            break
+        deleted_ids.extend(r["specimen_id"] for r in response_rows(response) if r.get("specimen_id"))
+
+    if not deleted_ids:
+        st.error(
+            "The database accepted no deletions — check that a DELETE policy exists on "
+            "specimen_records (run sql/add_delete_policies.sql in the Supabase SQL Editor)."
+        )
+        return None
+
+    deleted_set = set(deleted_ids)
+
+    # Tallies to correct, built from the rows the database really removed — only for
+    # children whose batch SURVIVES this delete. When the batch goes too there is no tally
+    # left to keep consistent.
+    restore: dict[str, dict] = {}
+    for sid in deleted_set:
+        row = doomed[sid]
+        parent_id = row.get("parent_specimen_id")
+        if not parent_id or parent_id in deleted_set:
+            continue
+        genus = subsampled_genus_of(row.get("field_screening_result"))
+        if not genus:
+            logger.warning(
+                "Individual %s has no recorded subsampled genus; its batch tally cannot "
+                "be corrected automatically", sid,
+            )
+            continue
+        restore.setdefault(parent_id, {})
+        restore[parent_id][genus] = restore[parent_id].get(genus, 0) + 1
+
+    tally_failures = [
+        parent_id for parent_id, genus_counts in restore.items()
+        if not _restore_vialed_out(parent_id, genus_counts)
+    ]
+
+    photos_removed = 0
+    if remove_photos:
+        urls = [
+            url
+            for sid in deleted_set
+            for url in (doomed[sid].get("photo_urls") or [])
+            if isinstance(url, str)
+        ]
+        photos_removed = delete_specimen_photos(urls)
+
+    clear_specimen_records_cache()
+
+    return {
+        "requested": len(rows),
+        "deleted": len(deleted_set),
+        "cascaded_children": sum(1 for sid in deleted_set if sid not in wanted),
+        "photos_removed": photos_removed,
+        "batches_restored": {p: c for p, c in restore.items() if p not in tally_failures},
+        "tally_failures": tally_failures,
+        "not_deleted": [sid for sid in ids if sid not in deleted_set],
+    }
+
+
+def delete_all_specimen_records(*, collector_id: str | None = None) -> dict | None:
+    """Delete every specimen row, or every one belonging to `collector_id`.
+
+    The bulk reset behind "start a clean trial". Scoping to a collector keeps one
+    investigator's demo run from wiping a colleague's real records off a shared project.
+    """
+    client = get_supabase_client()
+    if client is None:
+        st.error("Supabase is not configured — nothing can be deleted.")
+        return None
+
+    try:
+        query = client.table("specimen_records").select("specimen_id")
+        if collector_id:
+            query = query.eq("collector_id", collector_id)
+        response = query.execute()
+    except Exception as e:
+        logger.exception("Could not list specimen rows for the bulk delete")
+        st.error(f"Could not list the entries to delete: {e}")
+        return None
+
+    ids = [r["specimen_id"] for r in response_rows(response) if r.get("specimen_id")]
+    if not ids:
+        return {
+            "requested": 0, "deleted": 0, "cascaded_children": 0, "photos_removed": 0,
+            "batches_restored": {}, "tally_failures": [], "not_deleted": [],
+        }
+    return delete_specimen_records(ids)
+
+
+# --- The two side tables ------------------------------------------------------------
+# Neither schema is in sql/, so neither primary-key column name is knowable from this
+# repo. Discover it from a real row instead of hardcoding a guess: a wrong column name
+# would raise on every delete, and a guessed filter that happens to match nothing would
+# look like an empty table. If no candidate key is present, say so and delete nothing.
+_KEY_CANDIDATES = ("id", "uuid", "record_id", "result_id", "bioassay_id", "case_id", "entry_id")
+
+
+def _discover_key_column(table: str) -> str | None:
+    client = get_supabase_client()
+    if client is None:
+        return None
+    try:
+        response = client.table(table).select("*").limit(1).execute()
+    except Exception:
+        logger.exception("Could not probe %s for its primary-key column", table)
+        return None
+    row = first_row(response)
+    if row is None:
+        return None  # empty table — nothing to delete anyway
+    for candidate in _KEY_CANDIDATES:
+        if candidate in row:
+            return candidate
+    logger.error("No recognised key column on %s; columns were %s", table, sorted(row))
+    return None
+
+
+def _delete_all_rows(table: str, clear_cache) -> int | None:
+    """Delete every row in `table`. Returns the number deleted, or None if the table's
+    key column could not be identified or the database refused the delete."""
+    client = get_supabase_client()
+    if client is None:
+        st.error("Supabase is not configured — nothing can be deleted.")
+        return None
+
+    key = _discover_key_column(table)
+    if key is None:
+        try:
+            probe = client.table(table).select("*").limit(1).execute()
+            if first_row(probe) is None:
+                return 0  # already empty
+        except Exception:
+            logger.debug("Emptiness probe on %s failed", table, exc_info=True)
+        st.error(
+            f"Could not identify the primary-key column on {table}, so its rows were left "
+            "alone. Delete them from the Supabase table editor instead."
+        )
+        return None
+
+    try:
+        rows = response_rows(client.table(table).select(key).execute())
+    except Exception as e:
+        logger.exception("Could not list rows of %s for deletion", table)
+        st.error(f"Could not list {table} rows: {e}")
+        return None
+
+    ids = [r[key] for r in rows if r.get(key) is not None]
+    if not ids:
+        return 0
+
+    deleted = 0
+    for chunk in _chunked(ids):
+        try:
+            response = client.table(table).delete().in_(key, chunk).execute()
+        except Exception as e:
+            logger.exception("Delete on %s failed", table)
+            st.error(f"Could not delete {table} rows: {e}")
+            break
+        deleted += len(response_rows(response))
+
+    if deleted == 0:
+        st.error(
+            f"The database accepted no deletions on {table} — check that a DELETE policy "
+            "exists (run sql/add_delete_policies.sql in the Supabase SQL Editor)."
+        )
+        return None
+
+    clear_cache()
+    return deleted
+
+
+def delete_all_bioassay_results() -> int | None:
+    """Delete every bioassay replicate. Returns the count, or None on failure."""
+    return _delete_all_rows("bioassay_results", clear_bioassay_results_cache)
+
+
+def delete_all_clinical_case_data() -> int | None:
+    """Delete every logged clinical case record. Returns the count, or None on failure."""
+    return _delete_all_rows("clinical_case_data", clear_clinical_case_data_cache)
 
 
 # =============================================================================

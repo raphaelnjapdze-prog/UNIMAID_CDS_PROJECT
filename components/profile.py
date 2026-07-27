@@ -184,6 +184,100 @@ def _get_user_submissions(current_user_id):
     return None
 
 
+_RESET_SCOPE_MINE = "Only records I collected (recommended)"
+_RESET_SCOPE_ALL = "Every record in the project"
+
+
+def _render_trial_data_reset(current_uid: str | None) -> None:
+    """Bulk-clear logged data so a fresh trial or a demo can start from empty.
+
+    Deliberately explicit about what goes: the specimen ledger, the photos in storage,
+    and optionally the bioassay and clinical-case tables. Deleting rows while leaving the
+    photo objects behind is the half-cleaned state this exists to prevent — the objects
+    keep counting against storage and stay reachable by URL.
+
+    Scoping defaults to this collector's own records, because on a shared project a demo
+    reset must not be able to take a colleague's real field data with it.
+    """
+    st.subheader("Reset Logged Data")
+    st.caption(
+        "Clears logged entries so you can start a clean trial run. This deletes real "
+        "records permanently — export anything you want to keep from **Data & Privacy** "
+        "first. There is no undo."
+    )
+
+    scope = st.radio(
+        "What to clear",
+        [_RESET_SCOPE_MINE, _RESET_SCOPE_ALL],
+        key="reset_scope",
+        help=(
+            "Scoping to your own records leaves other investigators' data untouched. "
+            "Clearing everything is for a project you alone are using."
+        ),
+    )
+    if scope == _RESET_SCOPE_MINE and not current_uid:
+        st.warning("No signed-in user id available, so records cannot be scoped to you.")
+        return
+
+    also_bioassay = st.checkbox("Also clear all bioassay results", key="reset_bioassay")
+    also_clinical = st.checkbox("Also clear all clinical case records", key="reset_clinical")
+
+    if scope == _RESET_SCOPE_ALL or also_bioassay or also_clinical:
+        st.warning(
+            "The selections above are **project-wide** — they delete records regardless "
+            "of who logged them."
+        )
+
+    typed = st.text_input(
+        "Type RESET to confirm",
+        key="reset_confirm",
+        placeholder="RESET",
+    )
+    if not st.button(
+        "Delete logged data permanently", type="primary", width="stretch",
+        key="reset_go", disabled=typed.strip().upper() != "RESET",
+    ):
+        return
+
+    from utils.data_manager import (
+        delete_all_bioassay_results,
+        delete_all_clinical_case_data,
+        delete_all_specimen_records,
+    )
+
+    with st.spinner("Deleting records and photos…"):
+        summary = delete_all_specimen_records(
+            collector_id=current_uid if scope == _RESET_SCOPE_MINE else None
+        )
+        bioassay_deleted = delete_all_bioassay_results() if also_bioassay else None
+        clinical_deleted = delete_all_clinical_case_data() if also_clinical else None
+
+    # Each helper shows its own error and returns None on failure. Report only what the
+    # database confirmed — a reset that half-worked must not read as a clean slate.
+    if summary is not None:
+        if summary["deleted"]:
+            line = f"Deleted **{summary['deleted']}** specimen record(s)"
+            if summary.get("photos_removed"):
+                line += f" and **{summary['photos_removed']}** photo(s) from storage"
+            st.success(line + ".")
+        else:
+            st.info("No specimen records matched — the ledger was already empty.")
+        if summary.get("not_deleted"):
+            st.warning(
+                f"{len(summary['not_deleted'])} record(s) were refused by the database "
+                "and remain. They may belong to another account under row-level security."
+            )
+
+    if also_bioassay and bioassay_deleted is not None:
+        st.success(f"Deleted **{bioassay_deleted}** bioassay result(s).")
+    if also_clinical and clinical_deleted is not None:
+        st.success(f"Deleted **{clinical_deleted}** clinical case record(s).")
+
+    st.caption(
+        "Reload the Dashboard to see the cleared state — cached reads refresh within a minute."
+    )
+
+
 def render_profile_page():
     p_data, avatar_url = load_profile_meta()
 
@@ -269,6 +363,11 @@ def render_profile_page():
     )
 
     # ── Tabs ──────────────────────────────────────────────────────────────
+    # Read once, up front: both the Data & Privacy export and the Danger Zone reset scope
+    # themselves to this user, and picking it up inside one tab's block only to use it in
+    # another's is a dependency on tab render order.
+    current_uid = get_current_user_id() if auth_ok else None
+
     st.markdown("### Account Settings")
     tab_profile, tab_security, tab_notifications, tab_data, tab_danger = st.tabs(
         ["Profile", "Security", "Notifications", "Data & Privacy", "Danger Zone"]
@@ -395,7 +494,6 @@ def render_profile_page():
     # --- TAB 4: DATA & PRIVACY ---
     with tab_data:
         st.subheader("Export My Data")
-        current_uid = get_current_user_id() if auth_ok else None
         submissions_df = _get_user_submissions(current_uid)
 
         if submissions_df is not None and not submissions_df.empty:
@@ -419,6 +517,9 @@ def render_profile_page():
 
     # --- TAB 5: DANGER ZONE ---
     with tab_danger:
+        _render_trial_data_reset(current_uid if auth_ok else None)
+
+        st.markdown("---")
         st.subheader("Account Deletion")
         st.markdown(
             """

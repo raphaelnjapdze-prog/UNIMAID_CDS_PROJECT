@@ -16,6 +16,7 @@ import streamlit as st
 from utils.data_manager import (
     available_to_vial,
     clear_specimen_records_cache,
+    delete_specimen_records,
     extract_collector_display,
     fetch_batch_children,
     load_specimen_records,
@@ -385,6 +386,10 @@ def _render_subsampling():
 def _render_recent_entries():
     st.subheader("Recently Logged Entries")
 
+    # Before the early returns below: deleting the last entry empties the table, and the
+    # report of that deletion must still be shown rather than vanish with the rows.
+    _render_delete_summary()
+
     df = load_specimen_records()
     if df.empty:
         st.info("No entries logged yet.")
@@ -424,3 +429,111 @@ def _render_recent_entries():
         width="stretch",
         hide_index=True,
     )
+
+    _render_delete_entries(log_df)
+
+
+def _entry_label(row: dict) -> str:
+    """A label that identifies one collection event to a human picking it off a list."""
+    raw_date = row.get("collection_date")
+    # _render_recent_entries has already coerced this column with pd.to_datetime, but an
+    # unparseable date lands as NaT, so fall back to whatever is there.
+    when = raw_date.strftime("%Y-%m-%d") if isinstance(raw_date, pd.Timestamp) else str(raw_date or "no date")
+    site = row.get("breeding_site_type") or "unspecified site"
+    return f"{when} · {site} · {row.get('counts', '')} · {str(row.get('specimen_id', ''))[:8]}"
+
+
+def _render_delete_entries(log_df: pd.DataFrame) -> None:
+    """Delete site-log entries — the cleanup path for trial runs and demo data.
+
+    Kept behind an expander and a typed confirmation because it is irreversible and
+    deletes more than it is handed: a batch's vialed-out individuals go with it (they
+    cannot outlive the collection event they came from), and each entry's photos are
+    removed from storage. Deleting the row alone was what left dead photo URLs and
+    orphaned objects behind.
+    """
+    with st.expander("🗑️ Delete entries (irreversible)"):
+        st.caption(
+            "Removes the collection event, every individual specimen vialed out of it, "
+            "and its uploaded photos. Use this to clear a trial run before a fresh one — "
+            "there is no undo, and real field data deleted here is gone."
+        )
+
+        rows = log_df.to_dict("records")
+        labels = {_entry_label(row): row["specimen_id"] for row in rows if row.get("specimen_id")}
+        if not labels:
+            st.info("No entries available to delete.")
+            return
+
+        chosen = st.multiselect(
+            "Entries to delete",
+            list(labels.keys()),
+            key="sitelog_delete_pick",
+            help="Pick one or more collection events.",
+        )
+        if not chosen:
+            return
+
+        # Name the collateral before asking for confirmation. A batch with 40 vialed-out
+        # individuals looks like one row here, and the user should know that before typing.
+        child_total = 0
+        for label in chosen:
+            children = fetch_batch_children(labels[label])
+            child_total += 0 if children.empty else len(children)
+        if child_total:
+            st.warning(
+                f"These {len(chosen)} entr{'y' if len(chosen) == 1 else 'ies'} have "
+                f"**{child_total} vialed-out individual specimen(s)** linked to them. "
+                "Those will be deleted too — an individual cannot outlive its batch."
+            )
+
+        typed = st.text_input(
+            f"Type DELETE to remove {len(chosen)} entr{'y' if len(chosen) == 1 else 'ies'}",
+            key="sitelog_delete_confirm",
+            placeholder="DELETE",
+        )
+        if st.button(
+            "Delete permanently", type="primary", key="sitelog_delete_go",
+            disabled=typed.strip().upper() != "DELETE",
+        ):
+            with st.spinner("Deleting entries, linked specimens and photos…"):
+                summary = delete_specimen_records([labels[label] for label in chosen])
+            # delete_specimen_records surfaces its own error on failure; never toast a
+            # deletion that did not happen.
+            if summary:
+                st.session_state["sitelog_delete_summary"] = summary
+                st.session_state.pop("sitelog_delete_pick", None)
+                st.rerun()
+
+
+def _render_delete_summary() -> None:
+    """Report the last deletion after the rerun that performed it, including the parts
+    that did not go cleanly — a partial delete must not read as a clean one."""
+    summary = st.session_state.pop("sitelog_delete_summary", None)
+    if not summary:
+        return
+
+    parts = [f"Deleted **{summary['deleted']}** record(s)"]
+    if summary.get("cascaded_children"):
+        parts.append(f"including **{summary['cascaded_children']}** vialed-out individual(s)")
+    if summary.get("photos_removed"):
+        parts.append(f"and **{summary['photos_removed']}** photo(s) from storage")
+    st.success(" ".join(parts) + ".")
+
+    if summary.get("batches_restored"):
+        st.info(
+            "Specimens returned to their batch counts, so the collection totals stay "
+            "intact and they can be vialed out again."
+        )
+    if summary.get("not_deleted"):
+        st.warning(
+            f"{len(summary['not_deleted'])} record(s) were not deleted — the database "
+            "refused them. They may belong to another account under row-level security."
+        )
+    if summary.get("tally_failures"):
+        st.error(
+            f"{len(summary['tally_failures'])} batch tall(y/ies) could not be corrected "
+            "after deleting their individuals, so those collection events now report "
+            "fewer specimens than were caught. Check the batch counts, and that an UPDATE "
+            "policy exists on specimen_records (sql/add_update_policies.sql)."
+        )
