@@ -140,9 +140,15 @@ to re-run.
 | `add_investigator_profiles.sql` | Profiles + the avatar bucket. |
 | `enforce_collector_id.sql` | Rejects blank collectors at the database. |
 | `add_update_policies.sql`, `add_delete_policies.sql` | The RLS policies the app's writes need. |
+| `verify_deletion.sql` | Read-only/rolled-back check that the policies actually work. |
 
 Run the two policy files on any existing database — without them, updates and deletes match
-zero rows *without raising*, so they silently do nothing.
+zero rows *without raising*, so they silently do nothing. Then run `verify_deletion.sql`,
+which exercises them as the `authenticated` role and rolls everything back.
+
+> The *Provision Remote Tables* button on Profile → Security does not work and cannot replace
+> this: it needs `SUPABASE_SERVICE_ROLE_KEY` plus a `public.sql(sql text)` function that does
+> not exist in the database. Apply migrations by hand in the SQL Editor.
 
 The two side-table schemas are **reconstructions**: those tables were created by hand in the
 dashboard before the files existed, so the live tables are the authority. Each file ends with

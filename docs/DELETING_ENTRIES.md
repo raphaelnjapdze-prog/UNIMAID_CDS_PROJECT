@@ -24,6 +24,18 @@ The migration ends with a `select` that lists the policies; you should see a `DE
 for `specimen_records`, `bioassay_results`, `clinical_case_data`, and one on
 `storage.objects` for the `specimen-photos` bucket.
 
+Then run **`sql/verify_deletion.sql`** to confirm it worked. It checks the policies, then
+actually inserts a batch with two vialed-out individuals, deletes them **as the
+`authenticated` role** — the role your logged-in users get, not the `postgres` role the SQL
+Editor runs as, which bypasses RLS entirely and would pass regardless — and rolls the whole
+thing back. Read the PASS/FAIL column of each result. Nothing it does persists.
+
+> **Note:** the *Provision Remote Tables* button on Profile → Security cannot do any of
+> this. It needs `SUPABASE_SERVICE_ROLE_KEY` (not currently set) **and** a `public.sql(sql
+> text)` function in the database, which does not exist — `data_manager.py::attempt_create_supabase_table`
+> calls `rpc("sql", …)` and gets a `PGRST202 could not find the function` back. Migrations
+> are run by hand in the SQL Editor.
+
 ## Deleting individual entries
 
 **Site Log → Recently Logged Entries → 🗑️ Delete entries**
