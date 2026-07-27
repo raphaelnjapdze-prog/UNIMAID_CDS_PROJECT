@@ -121,16 +121,18 @@ def _render_genus_result(triage: dict):
         )
         return None
 
+    # Flat single-line HTML — see the note in _render_species_candidates: a
+    # standalone interpolation on its own source line is one empty value away
+    # from breaking the raw-HTML block.
+    inner = "".join([
+        '<div style="font-size:13px; color:#64748B; font-weight:600;">Resolved Genus</div>',
+        f'<div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{genus}</div>',
+        _badge(f"Confidence: {confidence}%", "#0369A1"),
+        f'<div style="font-size:13px; color:#475569; margin-top:8px;">{triage.get("reason","")}</div>',
+    ])
     st.markdown(
-        f"""
-        <div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px;
-                    background:white; margin-bottom:14px;">
-            <div style="font-size:13px; color:#64748B; font-weight:600;">Resolved Genus</div>
-            <div style="font-size:24px; font-weight:800; color:#0F172A; margin:4px 0 8px;">{genus}</div>
-            {_badge(f"Confidence: {confidence}%", "#0369A1")}
-            <div style="font-size:13px; color:#475569; margin-top:8px;">{triage.get('reason','')}</div>
-        </div>
-        """,
+        f'<div style="border:1px solid #E2E8F0; border-radius:12px; padding:16px 18px; '
+        f'background:white; margin-bottom:14px;">{inner}</div>',
         unsafe_allow_html=True,
     )
     return genus
@@ -167,20 +169,25 @@ def _render_species_candidates(candidates: list[dict], markers_ticked: bool):
         group = c.get("group_complex", "None")
         group_line = f'<div style="font-size:12px; color:#64748B;">Complex/Group: {group}</div>' if group and group != "None" else ""
 
+        # Flat single-line HTML, empty parts dropped — same rule as the deep-key
+        # cards. A species with no complex leaves `group_line` empty, and on its
+        # own source line that became a blank line once Streamlit dedented the
+        # block; a blank line closes markdown's raw-HTML block, so the rest of
+        # the card was escaped and rendered as literal markup on the page. Most
+        # Culex/Aedes species carry no complex, which is where it showed worst.
+        inner = "".join(p for p in [
+            '<div style="display:flex; justify-content:space-between; align-items:start; gap:12px;">'
+            f'<span style="font-size:16px; font-weight:700; color:#0F172A;">{c["species_name"]}</span>'
+            f'<span style="font-size:12px; color:#64748B; white-space:nowrap;">match score: {c["match_score"]}</span>'
+            "</div>",
+            group_line,
+            f'<div style="margin:8px 0;">{badges}</div>',
+            f'<div style="font-size:13px; color:#475569; line-height:1.5;">{c["field_diagnostic_notes"]}</div>',
+            f'<div style="font-size:12px; color:#64748B; margin-top:6px;"><em>{c["vector_status"]}</em></div>',
+        ] if p)
         st.markdown(
-            f"""
-            <div style="border:1px solid {border}; border-radius:12px; padding:16px 18px;
-                        margin-bottom:12px; background:white;">
-                <div style="display:flex; justify-content:space-between; align-items:start; gap:12px;">
-                    <span style="font-size:16px; font-weight:700; color:#0F172A;">{c['species_name']}</span>
-                    <span style="font-size:12px; color:#64748B; white-space:nowrap;">match score: {c['match_score']}</span>
-                </div>
-                {group_line}
-                <div style="margin:8px 0;">{badges}</div>
-                <div style="font-size:13px; color:#475569; line-height:1.5;">{c['field_diagnostic_notes']}</div>
-                <div style="font-size:12px; color:#64748B; margin-top:6px;"><em>{c['vector_status']}</em></div>
-            </div>
-            """,
+            f'<div style="border:1px solid {border}; border-radius:12px; padding:16px 18px; '
+            f'margin-bottom:12px; background:white;">{inner}</div>',
             unsafe_allow_html=True,
         )
 
