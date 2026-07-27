@@ -1183,10 +1183,13 @@ def delete_all_specimen_records(*, collector_id: str | None = None) -> dict | No
 
 
 # --- The two side tables ------------------------------------------------------------
-# Neither schema is in sql/, so neither primary-key column name is knowable from this
-# repo. Discover it from a real row instead of hardcoding a guess: a wrong column name
-# would raise on every delete, and a guessed filter that happens to match nothing would
-# look like an empty table. If no candidate key is present, say so and delete nothing.
+# sql/create_bioassay_results.sql and sql/create_clinical_case_data.sql declare `id uuid`
+# as the key, but both are reconstructions of tables that were created by hand in the
+# Supabase dashboard first — the live tables are the authority and may have drifted (an
+# `id bigint` identity column, say). So the key is discovered from a real row rather than
+# hardcoded: a wrong column name would raise on every delete, and a guessed filter that
+# happened to match nothing would look like an empty table. If no candidate key is
+# present, say so and delete nothing.
 _KEY_CANDIDATES = ("id", "uuid", "record_id", "result_id", "bioassay_id", "case_id", "entry_id")
 
 

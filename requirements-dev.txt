@@ -5,3 +5,8 @@
 
 pytest==9.1.1
 ruff==0.15.21
+
+# Wraps PostgreSQL's own parser. tests/test_sql_schemas.py uses it to check the files in
+# sql/ against the real grammar — including the RLS/policy statements that generic SQL
+# parsers do not model — and to diff their columns against what data_manager writes.
+pglast==8.4

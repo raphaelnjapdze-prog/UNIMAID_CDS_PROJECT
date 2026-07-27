@@ -79,6 +79,13 @@ The app reports partial failures rather than showing a clean-looking success:
   `vialed_out` count could not be decremented, so that collection event now reports fewer
   specimens than were caught. Check that `sql/add_update_policies.sql` has been run, then
   fix the batch's count in the Supabase table editor.
+- *"Could not identify the primary-key column on `bioassay_results`."* That table's key
+  column isn't one the app recognises. It looks for `id` first — see
+  `sql/create_bioassay_results.sql` / `sql/create_clinical_case_data.sql` for the expected
+  shape, and run each file's closing query to see what the live table actually has. Those
+  two schemas were reconstructed from the app's reads and writes, because both tables were
+  created by hand in the dashboard before the files existed; the live tables win, so update
+  the file if they differ. Until then, clear those rows from the Supabase table editor.
 - A photo that fails to delete never blocks the row — otherwise an unreachable bucket
   would make the ledger impossible to clean up. The row goes; the object is left and
   logged.

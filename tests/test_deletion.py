@@ -473,8 +473,9 @@ class TestSideTables:
         assert dm.delete_all_bioassay_results() == 0
 
     def test_an_unrecognised_key_column_deletes_nothing(self, fake):
-        """Neither side table's schema is in this repo. Guessing a key would either raise
-        on every delete or silently match nothing — so it refuses instead."""
+        """Both side tables predate their schema file and may have drifted from it, so the
+        key column is discovered at runtime. Guessing one would either raise on every
+        delete or silently match nothing — so it refuses instead."""
         client = fake({"bioassay_results": [{"assay_date": "2026-07-01", "treatment_name": "x"}]})
 
         assert dm.delete_all_bioassay_results() is None

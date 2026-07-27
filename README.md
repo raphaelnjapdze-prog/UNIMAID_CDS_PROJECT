@@ -128,11 +128,27 @@ Secrets are read from `.streamlit/secrets.toml` first, then environment variable
 
 ### Database migrations
 
-The files in `sql/` are applied by hand in the Supabase SQL Editor. `create_specimen_records.sql`
-builds the central table; the rest are additive and safe to re-run. Run
-`add_update_policies.sql` and `add_delete_policies.sql` on any existing database — without
-the matching row-level-security policies, updates and deletes match zero rows *without
-raising*, so they silently do nothing.
+The files in `sql/` are applied by hand in the Supabase SQL Editor. All are additive and safe
+to re-run.
+
+| File | Purpose |
+| --- | --- |
+| `create_specimen_records.sql` | The central table behind every page. |
+| `create_bioassay_results.sql` | WHO tube bioassay replicates. |
+| `create_clinical_case_data.sql` | Confirmed malaria case counts per facility. |
+| `add_specimen_subsampling.sql` | Vialing individuals out of a batch. |
+| `add_investigator_profiles.sql` | Profiles + the avatar bucket. |
+| `enforce_collector_id.sql` | Rejects blank collectors at the database. |
+| `add_update_policies.sql`, `add_delete_policies.sql` | The RLS policies the app's writes need. |
+
+Run the two policy files on any existing database — without them, updates and deletes match
+zero rows *without raising*, so they silently do nothing.
+
+The two side-table schemas are **reconstructions**: those tables were created by hand in the
+dashboard before the files existed, so the live tables are the authority. Each file ends with
+a query that prints the live column list to diff against it, and each keeps its `CHECK`
+constraints in a clearly marked section, since adding one to a table with violating rows
+fails outright.
 
 ### Clearing trial data
 
