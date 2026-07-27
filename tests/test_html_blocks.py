@@ -1,17 +1,25 @@
-"""Regression tests: the Morphology ID result cards must never leak raw markup.
+"""Regression tests: hand-built HTML blocks must never leak raw markup into the UI.
 
-Every card on the Diagnostics page is drawn with `st.markdown(..., unsafe_allow_html=True)`.
+Several pages draw cards and headers with `st.markdown(..., unsafe_allow_html=True)`.
 Streamlit dedents the string, then markdown parses it — and a blank line *closes* a
 raw-HTML block, so everything after it is escaped and rendered as literal markup on the
 page. That happens whenever an interpolated fragment sits alone on its source line and
 comes out empty: the line collapses to whitespace, dedent normalises it to a blank line,
-and the card spills its own HTML into the UI.
+and the block spills its own HTML into the UI.
 
-`_render_species_candidates` had exactly that shape — its `group_line` is empty for any
-species with no complex, which is most of the Culex and Aedes catalog, so those two genera
-spilled markup on nearly every card. The fix is to assemble flat single-line HTML with the
-empty parts dropped; these tests pin that property for every card the section can draw,
-against real catalog data rather than a hand-written fixture.
+Two places had exactly that shape:
+
+- `diagnostics._render_species_candidates` — its `group_line` is empty for any species
+  with no cryptic complex, which is most of the Culex and Aedes catalog, so those two
+  genera spilled markup on nearly every card. Visible breakage.
+- `dashboard._section` — its `caption_html` is empty on every captionless section (five
+  of six call sites). Only a closing tag trailed the blank line there, so nothing
+  visible leaked, but the wrapper div fell out of the block and anything added below
+  the caption would have been escaped onto the page.
+
+The fix in both is flat single-line HTML with the empty parts dropped. These tests pin
+that property for every block those functions can draw, driven from real catalog and
+key-profile data rather than hand-written fixtures.
 """
 import textwrap
 
@@ -56,6 +64,34 @@ def _assert_no_spilled_markup(at):
 
 def _all_markers(genus: str) -> list[str]:
     return sorted({m for sp in SPECIES_CATALOG[genus] for m in sp.get("field_markers", [])})
+
+
+class TestDashboardSectionHeaders:
+    """`_section` renders a title with an optional caption — the caption is the empty case."""
+
+    def test_header_with_a_caption_does_not_spill_html(self):
+        def app():
+            from components.dashboard import _section
+
+            _section("Specimen Ledger", "Every stored record.")
+
+        at = AppTest.from_function(app, default_timeout=30)
+        at.run()
+        _assert_no_spilled_markup(at)
+
+    def test_header_without_a_caption_does_not_spill_html(self):
+        """The case that broke: five of six dashboard sections pass no caption."""
+        def app():
+            from components.dashboard import _section
+
+            _section("Genus Distribution")
+
+        at = AppTest.from_function(app, default_timeout=30)
+        at.run()
+        _assert_no_spilled_markup(at)
+        # The title must sit in the same block as its wrapper, not be split off by a
+        # blank line — which is what the interior-blank-line check above enforces.
+        assert any("Genus Distribution" in md.value for md in at.markdown)
 
 
 class TestSpeciesCandidateCards:

@@ -45,17 +45,22 @@ def _section(title: str, caption: str | None = None) -> None:
         if caption
         else ""
     )
+    # Flat single-line HTML, empty parts dropped. Streamlit dedents the string before
+    # markdown parses it, and a blank line closes a raw-HTML block — so `caption_html`
+    # alone on its own source line collapsed to a blank line on every captionless
+    # section, cutting the header's wrapper div out of the block. Only a closing tag
+    # trailed it here, so nothing visible leaked; adding anything below the caption
+    # would have escaped it onto the page. Same rule as the Diagnostics result cards.
+    inner = "".join(p for p in [
+        "<div style='display:flex; align-items:center; gap:11px;'>"
+        f"<span style='width:4px; height:21px; background:{_ACCENT}; "
+        "border-radius:2px; display:inline-block;'></span>"
+        f"<span style='font-size:1.18rem; font-weight:700; color:#0f172a;'>{title}</span>"
+        "</div>",
+        caption_html,
+    ] if p)
     st.markdown(
-        f"""
-        <div style='margin:1.7rem 0 0.9rem 0;'>
-          <div style='display:flex; align-items:center; gap:11px;'>
-            <span style='width:4px; height:21px; background:{_ACCENT};
-                         border-radius:2px; display:inline-block;'></span>
-            <span style='font-size:1.18rem; font-weight:700; color:#0f172a;'>{title}</span>
-          </div>
-          {caption_html}
-        </div>
-        """,
+        f"<div style='margin:1.7rem 0 0.9rem 0;'>{inner}</div>",
         unsafe_allow_html=True,
     )
 
