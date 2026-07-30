@@ -9,6 +9,7 @@
 import csv
 import json
 import os
+import re
 from datetime import datetime
 from typing import cast
 
@@ -96,6 +97,24 @@ def _extract_screening_summary(field_screening_result) -> str:
     return f"{genus} ({method_label})"
 
 
+_ORG_UNIT_UNSAFE = re.compile(r"[^A-Z0-9]+")
+
+
+def _org_unit_code(site) -> str:
+    """A placeholder org-unit key that is at least well *formed*.
+
+    Only spaces were replaced before, so a breeding site type like
+    "Rice Field / Irrigated Field" produced `SITE_RICE_FIELD_/_IRRIGATED_FIELD` — a slash
+    inside an identifier, which DHIS2 rejects on import. Every run of non-alphanumerics
+    collapses to a single underscore instead.
+
+    Still a placeholder keyed on breeding_site_type, not a real DHIS2 UID: the actual
+    registry mapping lives in `utils/dhis2_client.py::NIGERIA_NHMIS_ORG_UNITS`.
+    """
+    cleaned = _ORG_UNIT_UNSAFE.sub("_", str(site or "UNSPECIFIED").upper()).strip("_")
+    return f"SITE_{cleaned or 'UNSPECIFIED'}"
+
+
 def _build_dhis2_payload(df: pd.DataFrame) -> str:
     """
     Aggregates real specimen counts by collection date and breeding site
@@ -119,7 +138,7 @@ def _build_dhis2_payload(df: pd.DataFrame) -> str:
         for key, count in grouped.items():
             date, site, genus = cast(tuple, key)
             period = pd.to_datetime(date).strftime("%Y%m%d") if pd.notna(date) else datetime.now().strftime("%Y%m%d")
-            org_unit = f"SITE_{str(site or 'UNSPECIFIED').upper().replace(' ', '_')}"
+            org_unit = _org_unit_code(site)
             element_map = {"Anopheles": "ZVD_LDI_001", "Culex": "ZVD_LDI_002", "Aedes": "ZVD_LDI_003"}
             data_values.append({
                 "dataElement": element_map.get(genus, "ZVD_LDI_999"),
@@ -129,6 +148,43 @@ def _build_dhis2_payload(df: pd.DataFrame) -> str:
             })
 
     return json.dumps({"dataValues": data_values}, indent=2)
+
+
+def _payload_value_count(payload: str) -> int:
+    """How many dataValues the generated payload holds, for the confirmation line.
+
+    The payload is a string in session_state, so this re-reads it. A payload we cannot
+    parse reports 0 rather than raising — the count is a convenience, and it must never be
+    the thing that breaks the dashboard.
+    """
+    try:
+        return len(json.loads(payload).get("dataValues", []))
+    except Exception:
+        logger.debug("Could not count dataValues in the DHIS2 payload", exc_info=True)
+        return 0
+
+
+def _render_dhis2_payload_preview() -> None:
+    """Show the generated DHIS2 payload full-width, below the header.
+
+    Collapsed by default: the payload is generated to be downloaded, so the JSON is there
+    to be checked, not read top to bottom.
+    """
+    payload = st.session_state.get("dhis2_payload")
+    if not payload:
+        return
+
+    count = _payload_value_count(payload)
+    with st.expander(f"DHIS2 payload — {count} data value(s)", expanded=False):
+        st.caption(
+            "Org unit and data element codes are placeholders derived from "
+            "breeding_site_type — map them to your instance's real DHIS2 UIDs before "
+            "submitting. Aggregated by collection date, site type, and genus."
+        )
+        st.code(payload, language="json", height=320, wrap_lines=True)
+        if st.button("Clear payload", width="content"):
+            st.session_state.pop("dhis2_payload", None)
+            st.rerun()
 
 
 def _save_subscriber(email: str) -> bool:
@@ -292,7 +348,7 @@ def render_dashboard_page():
             # and its own download button disappeared before the file could be saved.
             payload = st.session_state.get("dhis2_payload")
             if payload:
-                st.code(payload, language="json")
+                st.success(f"{_payload_value_count(payload)} data value(s) ready — shown below.")
                 st.download_button(
                     "Download payload JSON", data=payload,
                     file_name=f"dhis2_payload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
@@ -306,6 +362,13 @@ def render_dashboard_page():
                     file_name=f"specimen_records_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv", width="stretch",
                 )
+
+    # Drawn out here, in the page body, rather than inside the popover above. The popover is
+    # anchored to a 1/5-width column, so a JSON block rendered in it overflowed its own
+    # container — the "code spill". Full page width plus wrap_lines keeps every line inside
+    # the viewport on a phone, and the fixed height stops a large export from burying the
+    # dashboard under a wall of JSON.
+    _render_dhis2_payload_preview()
 
     if df.empty:
         st.info(
