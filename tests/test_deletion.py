@@ -98,12 +98,20 @@ class _Bucket:
         self.store, self.name = store, name
 
     def remove(self, paths):
+        # Storage answers with the list of objects it deleted. Blocking is modelled as an
+        # empty list, NOT an exception, because that is what the real API does: RLS on
+        # storage.objects turns a delete with no matching policy into 200 [] — verified
+        # against the live bucket. A fake that raised instead made the silent-no-op case
+        # untestable, which is how the app came to report photos removed that were not.
+        if self.store.storage_unreachable:
+            raise RuntimeError("storage is unreachable")
         if self.store.blocked_storage:
-            raise RuntimeError("no delete policy on storage.objects")
-        for path in paths:
+            return []
+        deleted = [p for p in paths if p in self.store.objects]
+        for path in deleted:
             self.store.objects.discard(path)
-        self.store.removed.extend(paths)
-        return {}
+        self.store.removed.extend(deleted)
+        return [{"name": p} for p in deleted]
 
 
 class _Storage:
@@ -122,6 +130,7 @@ class FakeSupabase:
         self.blocked_deletes: set[str] = set()
         self.blocked_updates: set[str] = set()
         self.blocked_storage = False
+        self.storage_unreachable = False
         self.storage = _Storage(self)
 
     def table(self, name):
@@ -360,19 +369,57 @@ class TestPhotosGoWithTheRow:
 
         assert client.objects == set()
 
-    def test_a_bucket_that_refuses_deletes_does_not_block_the_row(self, fake):
+    def test_an_unreachable_bucket_does_not_block_the_row(self, fake):
         """Otherwise an unreachable bucket would make the ledger impossible to clean up."""
         client = fake(
             {"specimen_records": [_batch(photos=[_photo_url("batch-1")])]},
             objects={"batch-1/a.jpg"},
         )
-        client.blocked_storage = True
+        client.storage_unreachable = True
 
         summary = dm.delete_specimen_records(["batch-1"])
 
         assert summary is not None and summary["deleted"] == 1
         assert client.ids() == []
         assert summary["photos_removed"] == 0
+        assert summary["photos_orphaned"] == 1
+
+    def test_a_silently_blocked_remove_is_not_counted_as_removed(self, fake):
+        """The bug this pins: RLS makes a blocked remove look like a successful one.
+
+        Storage returns 200 with an empty list when no DELETE policy matches — no
+        exception. Counting the paths we asked about reported every photo cleaned up while
+        all of them were still in the bucket, unreferenced by any row and still served at
+        their public URL. Nothing about the response distinguishes that from success
+        except the list itself, so the list is what gets counted.
+        """
+        client = fake(
+            {"specimen_records": [_batch(photos=[_photo_url("batch-1", "one.jpg"),
+                                                 _photo_url("batch-1", "two.jpg")])]},
+            objects={"batch-1/one.jpg", "batch-1/two.jpg"},
+        )
+        client.blocked_storage = True
+
+        summary = dm.delete_specimen_records(["batch-1"])
+
+        assert summary is not None
+        assert summary["photos_removed"] == 0, "claimed a photo cleanup that never happened"
+        assert summary["photos_orphaned"] == 2
+        assert client.objects == {"batch-1/one.jpg", "batch-1/two.jpg"}
+
+    def test_a_partial_remove_reports_only_what_went(self, fake):
+        """One object already gone, one refused: the count follows the bucket, not the ask."""
+        fake(
+            {"specimen_records": [_batch(photos=[_photo_url("batch-1", "one.jpg"),
+                                                 _photo_url("batch-1", "two.jpg")])]},
+            objects={"batch-1/one.jpg"},
+        )
+
+        summary = dm.delete_specimen_records(["batch-1"])
+
+        assert summary is not None
+        assert summary["photos_removed"] == 1
+        assert summary["photos_orphaned"] == 1
 
     def test_photos_can_be_kept(self, fake):
         client = fake(
@@ -448,6 +495,7 @@ class TestBulkReset:
         summary = dm.delete_all_specimen_records()
         assert summary == {
             "requested": 0, "deleted": 0, "cascaded_children": 0, "photos_removed": 0,
+            "photos_orphaned": 0,
             "batches_restored": {}, "tally_failures": [], "not_deleted": [],
         }
 

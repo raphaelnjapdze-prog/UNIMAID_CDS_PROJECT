@@ -267,6 +267,14 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
                 f"{len(summary['not_deleted'])} record(s) were refused by the database "
                 "and remain. They may belong to another account under row-level security."
             )
+        if summary.get("photos_orphaned"):
+            st.warning(
+                f"{summary['photos_orphaned']} photo(s) are still in storage — the bucket "
+                "refused to remove them. Nothing points at those files now, but they still "
+                "count against storage and stay reachable by their public URL. Check for a "
+                "DELETE policy on storage.objects for the specimen-photos bucket "
+                "(sql/add_delete_policies.sql)."
+            )
 
     if also_bioassay and bioassay_deleted is not None:
         st.success(f"Deleted **{bioassay_deleted}** bioassay result(s).")

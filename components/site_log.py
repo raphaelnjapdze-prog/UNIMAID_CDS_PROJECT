@@ -530,6 +530,14 @@ def _render_delete_summary() -> None:
             f"{len(summary['not_deleted'])} record(s) were not deleted — the database "
             "refused them. They may belong to another account under row-level security."
         )
+    if summary.get("photos_orphaned"):
+        st.warning(
+            f"{summary['photos_orphaned']} photo(s) are still in storage — the bucket "
+            "refused to remove them. The records are gone, so nothing points at those "
+            "files any more, but they still count against storage and stay reachable by "
+            "their public URL. Check that a DELETE policy exists on storage.objects for "
+            "the specimen-photos bucket (sql/add_delete_policies.sql)."
+        )
     if summary.get("tally_failures"):
         st.error(
             f"{len(summary['tally_failures'])} batch tall(y/ies) could not be corrected "

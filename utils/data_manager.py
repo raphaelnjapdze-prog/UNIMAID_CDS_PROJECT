@@ -913,31 +913,62 @@ def _storage_path_from_public_url(url: str) -> str | None:
     return path or None
 
 
-def delete_specimen_photos(photo_urls) -> int:
-    """Remove a row's photos from the specimen-photos bucket. Returns how many were
-    removed. Best-effort by design: a failed object delete is logged and reported, but
-    must not block deleting the row, or an unreachable bucket would make the ledger
-    impossible to clean up."""
+def _count_removed_objects(response, requested: list[str]) -> int:
+    """How many objects Storage says it actually deleted.
+
+    The API answers with the list of deleted objects. Anything else — an unparseable body,
+    a different shape from another client version — is not evidence of a deletion, so it
+    counts as none. That errs toward warning about photos that did in fact go, which is
+    the harmless direction; the opposite claims a cleanup that never happened.
+    """
+    if not isinstance(response, list):
+        return 0
+    return min(sum(1 for item in response if isinstance(item, dict)), len(requested))
+
+
+def delete_specimen_photos(photo_urls) -> tuple[int, int]:
+    """Remove a row's photos from the specimen-photos bucket.
+
+    Returns (removed, orphaned): objects the bucket confirmed gone, and objects still
+    there. Best-effort by design — a failure is reported, not raised, or an unreachable
+    bucket would make the ledger impossible to clean up.
+
+    remove() is not trusted to have done anything. RLS applies to storage.objects as it
+    does to a table, and a delete with no matching policy returns **200 with an empty
+    list** rather than an error — the same silent no-op an unpermitted table DELETE gives.
+    Counting the paths we asked about therefore reported every photo removed while all of
+    them survived, still counting against storage and still reachable by public URL. Count
+    what the bucket sends back instead.
+    """
     client = get_supabase_client()
     if client is None or not photo_urls:
-        return 0
+        return 0, 0
 
     paths = [p for url in photo_urls if (p := _storage_path_from_public_url(url))]
     if not paths:
-        return 0
+        return 0, 0
 
     removed = 0
     for chunk in _chunked(paths):
         try:
-            client.storage.from_(_PHOTO_BUCKET).remove(chunk)
-            removed += len(chunk)
+            response = client.storage.from_(_PHOTO_BUCKET).remove(chunk)
         except Exception:
             logger.warning(
                 "Could not remove %d photo object(s) from %s; the rows will still be "
                 "deleted and the objects left behind", len(chunk), _PHOTO_BUCKET,
                 exc_info=True,
             )
-    return removed
+            continue
+        removed += _count_removed_objects(response, chunk)
+
+    orphaned = len(paths) - removed
+    if orphaned:
+        logger.warning(
+            "%d of %d photo object(s) were not removed from %s — the bucket reported them "
+            "as untouched. Check that a DELETE policy exists on storage.objects for this "
+            "bucket (sql/add_delete_policies.sql).", orphaned, len(paths), _PHOTO_BUCKET,
+        )
+    return removed, orphaned
 
 
 def _fetch_rows_by_id(specimen_ids: list[str]) -> list[dict]:
@@ -1041,7 +1072,11 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
       requested          ids passed in that matched a real row
       deleted            rows actually removed, as counted by the database
       cascaded_children  vialed-out individuals removed along with their batch
-      photos_removed     storage objects deleted
+      photos_removed     storage objects the bucket confirmed it deleted
+      photos_orphaned    storage objects that survived the delete — the rows citing them
+                         are gone, so they are now unreferenced but still stored and still
+                         reachable by public URL. Surface it; it usually means no DELETE
+                         policy on storage.objects for the bucket
       batches_restored   {batch_id: {genus: count}} tallies decremented
       tally_failures     batch ids whose tally could NOT be corrected — their totals
                          are now short by the deleted children, and the caller must
@@ -1129,7 +1164,7 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
         if not _restore_vialed_out(parent_id, genus_counts)
     ]
 
-    photos_removed = 0
+    photos_removed = photos_orphaned = 0
     if remove_photos:
         urls = [
             url
@@ -1137,7 +1172,7 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
             for url in (doomed[sid].get("photo_urls") or [])
             if isinstance(url, str)
         ]
-        photos_removed = delete_specimen_photos(urls)
+        photos_removed, photos_orphaned = delete_specimen_photos(urls)
 
     clear_specimen_records_cache()
 
@@ -1146,6 +1181,7 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
         "deleted": len(deleted_set),
         "cascaded_children": sum(1 for sid in deleted_set if sid not in wanted),
         "photos_removed": photos_removed,
+        "photos_orphaned": photos_orphaned,
         "batches_restored": {p: c for p, c in restore.items() if p not in tally_failures},
         "tally_failures": tally_failures,
         "not_deleted": [sid for sid in ids if sid not in deleted_set],
@@ -1177,6 +1213,7 @@ def delete_all_specimen_records(*, collector_id: str | None = None) -> dict | No
     if not ids:
         return {
             "requested": 0, "deleted": 0, "cascaded_children": 0, "photos_removed": 0,
+            "photos_orphaned": 0,
             "batches_restored": {}, "tally_failures": [], "not_deleted": [],
         }
     return delete_specimen_records(ids)

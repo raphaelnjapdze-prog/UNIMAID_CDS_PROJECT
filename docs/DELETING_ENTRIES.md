@@ -101,6 +101,13 @@ The app reports partial failures rather than showing a clean-looking success:
 - A photo that fails to delete never blocks the row — otherwise an unreachable bucket
   would make the ledger impossible to clean up. The row goes; the object is left and
   logged.
+- **"N photo(s) are still in storage"** means the bucket refused to remove them. It does
+  not refuse loudly: a delete with no matching policy comes back as an empty success, so
+  the app counts the objects the bucket confirms and reports the difference rather than
+  taking the call at its word. The records are already gone, so nothing points at those
+  files any more, but they still use quota and are still served at their public URL. Run
+  `sql/add_delete_policies.sql`, which adds the DELETE policy on `storage.objects` for the
+  `specimen-photos` bucket, then clear the leftovers under **Storage** in the dashboard.
 
 ## Doing it straight from Supabase
 
