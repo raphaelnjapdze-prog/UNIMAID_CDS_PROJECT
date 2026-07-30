@@ -11,7 +11,6 @@ import json
 import os
 import re
 from datetime import datetime
-from typing import cast
 
 import folium
 import pandas as pd
@@ -22,6 +21,7 @@ from utils.auth import get_supabase_client
 from utils.data_manager import (
     add_collector_column,
     build_collection_events,
+    extract_genus_counts_from_screening,
     extract_primary_genus,
     load_specimen_records,
 )
@@ -126,26 +126,41 @@ def _build_dhis2_payload(df: pd.DataFrame) -> str:
     if df.empty:
         return json.dumps({"dataValues": []}, indent=2)
 
-    working = df.copy()
-    working["genus"] = working["field_screening_result"].apply(_extract_genus)
-    working = working.dropna(subset=["genus"])
+    # Counted with extract_genus_counts_from_screening, not by counting rows. A row is not a
+    # specimen: a manual_field_log row is a whole batch holding raw genus counts, and it
+    # resolves to no single genus, so grouping on extract_primary_genus dropped every batch
+    # from the export. A batch of 500 with 100 vialed out reported 100 to DHIS2 and lost the
+    # other 400. This is the same helper the dashboard totals use, so the export and the
+    # figures on screen now agree, and it nets out vialed_out so a batch and its children are
+    # never both counted.
+    totals: dict[tuple, int] = {}
+    for _, row in df.iterrows():
+        counts = extract_genus_counts_from_screening(row.get("field_screening_result"))
+        if not counts:
+            continue
+        for genus, count in counts.items():
+            key = (row.get("collection_date"), row.get("breeding_site_type"), genus)
+            totals[key] = totals.get(key, 0) + int(count)
+
+    # "Other" is a real category the batch counter reports (other_genera_count); it gets its
+    # own code rather than the unmapped fallback, which would merge "genera we don't break
+    # out" with "genus we failed to recognise" — two different things to whoever reads this.
+    element_map = {
+        "Anopheles": "ZVD_LDI_001",
+        "Culex": "ZVD_LDI_002",
+        "Aedes": "ZVD_LDI_003",
+        "Other": "ZVD_LDI_004",
+    }
 
     data_values = []
-    if not working.empty:
-        grouped = working.groupby(["collection_date", "breeding_site_type", "genus"]).size()
-        # .items() yields the MultiIndex key as a Hashable; it is a 3-tuple here, but the
-        # type checker cannot know that from the groupby, so name the parts explicitly.
-        for key, count in grouped.items():
-            date, site, genus = cast(tuple, key)
-            period = pd.to_datetime(date).strftime("%Y%m%d") if pd.notna(date) else datetime.now().strftime("%Y%m%d")
-            org_unit = _org_unit_code(site)
-            element_map = {"Anopheles": "ZVD_LDI_001", "Culex": "ZVD_LDI_002", "Aedes": "ZVD_LDI_003"}
-            data_values.append({
-                "dataElement": element_map.get(genus, "ZVD_LDI_999"),
-                "period": period,
-                "orgUnit": org_unit,
-                "value": str(int(count)),
-            })
+    for (date, site, genus), count in sorted(totals.items(), key=lambda kv: str(kv[0])):
+        period = pd.to_datetime(date).strftime("%Y%m%d") if pd.notna(date) else datetime.now().strftime("%Y%m%d")
+        data_values.append({
+            "dataElement": element_map.get(genus, "ZVD_LDI_999"),
+            "period": period,
+            "orgUnit": _org_unit_code(site),
+            "value": str(int(count)),
+        })
 
     return json.dumps({"dataValues": data_values}, indent=2)
 

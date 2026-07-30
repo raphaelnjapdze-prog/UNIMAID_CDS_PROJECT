@@ -1402,7 +1402,11 @@ def extract_genus_counts_from_screening(field_screening_result: dict | None) -> 
     identification methods (checklist/vision/classifier) contribute 1 to
     whichever genus was resolved, or nothing if undetermined.
     """
-    if not field_screening_result or not isinstance(field_screening_result, dict):
+    # Decode a JSON string the same way extract_primary_genus does. The column is JSONB and
+    # usually arrives parsed, but not always, and returning {} for a string silently dropped
+    # every specimen on that row — an undercount that looks like an empty collection.
+    field_screening_result = _as_screening_dict(field_screening_result)
+    if not field_screening_result:
         return {}
 
     method = field_screening_result.get("screening_method")
