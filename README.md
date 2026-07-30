@@ -140,11 +140,17 @@ to re-run.
 | `add_investigator_profiles.sql` | Profiles + the avatar bucket. |
 | `enforce_collector_id.sql` | Rejects blank collectors at the database. |
 | `add_update_policies.sql`, `add_delete_policies.sql` | The RLS policies the app's writes need. |
+| `add_storage_policies.sql` | The `specimen-photos` bucket: upload requires a signed-in user, read is public. |
 | `verify_deletion.sql` | Read-only/rolled-back check that the policies actually work. |
 
 Run the two policy files on any existing database — without them, updates and deletes match
 zero rows *without raising*, so they silently do nothing. Then run `verify_deletion.sql`,
 which exercises them as the `authenticated` role and rolls everything back.
+
+`add_storage_policies.sql` covers a separate surface: photos live in a Storage bucket, not in
+a table, so table policies say nothing about them. Unlike a table write, a rejected upload
+*does* raise — a failed photo upload surfaces as "new row violates row-level security policy".
+Its pre-flight query prints the bucket's current policies before changing anything.
 
 > The *Provision Remote Tables* button on Profile → Security does not work and cannot replace
 > this: it needs `SUPABASE_SERVICE_ROLE_KEY` plus a `public.sql(sql text)` function that does

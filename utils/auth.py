@@ -101,6 +101,30 @@ def _current_access_token():
     return st.session_state.get("sb_access_token")
 
 
+def _apply_storage_token(client, token: str) -> None:
+    """Put the user's access token on the storage client so uploads are not anon.
+
+    storage3 keeps *two* header stores and only one of them reaches the wire.
+    `_request()` does `headers.update(self._headers)` and passes the result to httpx
+    **explicitly**, and an explicit per-request header beats the session default — so
+    setting only `storage._client.headers` (the httpx session) is silently overwritten
+    by the anon key captured in `_headers` at client construction. Every upload then
+    went out as `anon` and Storage rejected it with "new row violates row-level
+    security policy", which the caller reported as a failed photo upload.
+
+    `_headers` is the one that ships, and `from_()` hands that same object to each
+    bucket proxy, so mutating it in place also reaches an already-built proxy. The
+    session header is set too: it costs nothing and covers any path that skips
+    `_request`.
+    """
+    bearer = f"Bearer {token}"
+    storage = client.storage
+    storage._headers["Authorization"] = bearer
+    session = getattr(storage, "_client", None)
+    if session is not None:
+        session.headers["Authorization"] = bearer
+
+
 def get_supabase_client():
     """
     Returns the shared Supabase client, re-attaching the current user's
@@ -120,9 +144,9 @@ def get_supabase_client():
     if token:
         try:
             client.postgrest.auth(token)
-            client.storage._client.headers["Authorization"] = f"Bearer {token}"
+            _apply_storage_token(client, token)
         except Exception:
-            logger.debug("Failed to re-apply auth token to Supabase client", exc_info=True)
+            logger.warning("Failed to re-apply auth token to Supabase client", exc_info=True)
     return client
 
 
