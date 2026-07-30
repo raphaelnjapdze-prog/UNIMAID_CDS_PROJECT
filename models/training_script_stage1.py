@@ -37,6 +37,12 @@ from pathlib import Path
 
 import torch
 
+# Running this file directly — the invocation documented above — puts models/ on sys.path
+# but not the repo root, so the `models.` imports below died with ModuleNotFoundError
+# before a single image was read. Add the repo root so both that command and
+# `python -m models.training_script_stage1` work.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from models.stage1_genus_classifier import (
     Stage1GenusClassifier,
     get_data_loaders,
