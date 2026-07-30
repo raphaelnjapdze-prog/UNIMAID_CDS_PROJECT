@@ -16,6 +16,9 @@ create table if not exists public.specimen_records (
     gps_lat double precision,
     gps_lon double precision,
     breeding_site_type text,
+    -- Administrative area of the collection event, and the DHIS2 org unit dimension.
+    -- See sql/add_lga_column.sql (migration for existing databases).
+    lga text,
     photo_urls text[] default array[]::text[],
     field_screening_result jsonb not null default '{}'::jsonb,
     pcr_status pcr_status not null default 'not_submitted',
@@ -35,6 +38,7 @@ create index if not exists idx_specimen_records_collection_date on public.specim
 create index if not exists idx_specimen_records_collector_id on public.specimen_records (collector_id);
 create index if not exists idx_specimen_records_pcr_status on public.specimen_records (pcr_status);
 create index if not exists idx_specimen_records_parent on public.specimen_records (parent_specimen_id);
+create index if not exists idx_specimen_records_lga on public.specimen_records (lga);
 
 create or replace function public.set_updated_at()
 returns trigger as $$

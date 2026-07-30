@@ -141,6 +141,7 @@ to re-run.
 | `enforce_collector_id.sql` | Rejects blank collectors at the database. |
 | `add_update_policies.sql`, `add_delete_policies.sql` | The RLS policies the app's writes need. |
 | `add_storage_policies.sql` | The `specimen-photos` bucket: upload requires a signed-in user, read is public. |
+| `add_lga_column.sql` | Records which LGA a collection happened in — the DHIS2 org unit dimension. |
 | `verify_deletion.sql` | Read-only/rolled-back check that the policies actually work. |
 
 Run the two policy files on any existing database — without them, updates and deletes match

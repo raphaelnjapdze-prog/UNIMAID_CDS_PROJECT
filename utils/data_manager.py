@@ -139,6 +139,7 @@ def submit_site_log_entry(
     breeding_site_type: str,
     gps_lat: float | None = None,
     gps_lon: float | None = None,
+    lga: str | None = None,
     anopheles_count: int = 0,
     culex_count: int = 0,
     aedes_count: int = 0,
@@ -178,6 +179,7 @@ def submit_site_log_entry(
         breeding_site_type=breeding_site_type,
         gps_lat=gps_lat,
         gps_lon=gps_lon,
+        lga=lga,
         anopheles_count=anopheles_count,
         culex_count=culex_count,
         aedes_count=aedes_count,
@@ -218,6 +220,7 @@ def build_site_log_record(
     breeding_site_type: str,
     gps_lat: float | None,
     gps_lon: float | None,
+    lga: str | None = None,
     anopheles_count: int = 0,
     culex_count: int = 0,
     aedes_count: int = 0,
@@ -239,6 +242,10 @@ def build_site_log_record(
         "gps_lat": gps_lat,
         "gps_lon": gps_lon,
         "breeding_site_type": breeding_site_type,
+        # The DHIS2 org unit dimension. Stored as the plain LGA name, not a DHIS2 UID: the
+        # UID belongs to whichever instance the data is submitted to, and baking one into
+        # the row would tie every record to today's registry.
+        "lga": lga or None,
         "photo_urls": [photo_url] if photo_url else [],
         "field_screening_result": {
             "screening_method": "manual_field_log",
@@ -361,6 +368,11 @@ def _build_subsample_children(
             "gps_lat": batch_row.get("gps_lat"),
             "gps_lon": batch_row.get("gps_lon"),
             "breeding_site_type": batch_row.get("breeding_site_type"),
+            # Inherited, like the date and coordinates: a vialed individual was caught at
+            # the same collection event as its batch. Without this the child would export
+            # as unmapped while its own batch exported correctly, splitting one event
+            # across two org units.
+            "lga": batch_row.get("lga"),
             "photo_urls": [],
             "tube_label": f"{tube_prefix}-{i + 1:03d}" if tube_prefix else None,
             "field_screening_result": {
@@ -1359,6 +1371,7 @@ def attempt_create_supabase_table() -> bool:
             gps_lat double precision,
             gps_lon double precision,
             breeding_site_type text,
+            lga text,
             photo_urls text[],
             field_screening_result jsonb,
             pcr_status text NOT NULL DEFAULT 'not_submitted',

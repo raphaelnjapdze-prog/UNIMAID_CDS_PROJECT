@@ -2,32 +2,94 @@
 # NATIONAL INFORMATION SYSTEM API GATEWAY INTERFACE (utils/dhis2_client.py)
 # =========================================================================
 import json
+import re
 
 import pandas as pd
 import requests
 import streamlit as st
 
+from utils.config import get_secret
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Hardcoded dictionary placeholder showing how standard regional names map
-# to unique UIDs inside the National DHIS2 Organisation Unit registry.
-NIGERIA_NHMIS_ORG_UNITS = {
-    "Maiduguri": "Hg7824kHGhd",
-    "Jere": "Yt8923jHGfd",
-    "Bama": "Pl6712mNBvc",
-    "Biye": "Kj8934nBvcd"
-}
+# =========================================================================
+# Registry mappings: LGA name -> DHIS2 org unit UID, genus -> data element UID.
+#
+# These were previously hardcoded dictionaries of invented UIDs — "Hg7824kHGhd",
+# "uM8923hGjdf" — that looked exactly like real DHIS2 identifiers and belonged to no
+# instance anywhere. A well-formed fake is worse than an obvious placeholder, because it
+# invites the reader to trust it. They are gone.
+#
+# A UID is a fact about one DHIS2 instance, not about a mosquito or a place, so it cannot
+# be hardcoded here at all: the same LGA has different UIDs on the demo server and on a
+# national instance. Both maps are therefore CONFIGURATION, empty until supplied, read
+# from secrets as JSON objects:
+#
+#     DHIS2_ORG_UNIT_MAP  = '{"Maiduguri": "<uid>", "Jere": "<uid>"}'
+#     DHIS2_DATA_ELEMENT_MAP = '{"Anopheles": "<uid>", "Culex": "<uid>"}'
+#
+# scripts/fetch_dhis2_uids.py queries the configured instance and prints a skeleton to
+# fill in. An unmapped name resolves to None and is reported by the caller, never guessed.
+# =========================================================================
 
-# Unique structural Data Element UIDs mapped to the vector registry fields
-VECTOR_DATA_ELEMENT_MAPPINGS = {
-    "Anopheles": "uM8923hGjdf",
-    "Culex": "vK7812jHfds",
-    "Aedes": "wL9034kHGda",
-    "Mansonia": "xM1289jHGfd",
-    "Other_Genera": "zP5634kHGas"
-}
+
+# A name with no UID is written into the payload as UNMAPPED_<NAME> rather than omitted.
+# Omitting it would silently shrink the export — the old `if not org_unit_uid: continue`
+# bug. A value that is visibly unmapped can be spotted in the file, counted in the UI, and
+# refused by push_data_values, which are three chances to notice.
+UNMAPPED_PREFIX = "UNMAPPED_"
+
+
+def unmapped_code(kind: str, name) -> str:
+    """A readable stand-in for a UID that does not exist yet, e.g. UNMAPPED_LGA_JERE."""
+    cleaned = re.sub(r"[^A-Z0-9]+", "_", str(name or "UNSPECIFIED").upper()).strip("_")
+    return f"{UNMAPPED_PREFIX}{kind.upper()}_{cleaned or 'UNSPECIFIED'}"
+
+
+def is_unmapped(uid) -> bool:
+    """True for a placeholder produced by unmapped_code(), or for a missing UID."""
+    return not uid or str(uid).startswith(UNMAPPED_PREFIX)
+
+
+def _load_uid_map(secret_key: str) -> dict[str, str]:
+    """A {name: UID} map from a JSON secret. Empty (not fatal) when unset or malformed.
+
+    An unreadable mapping must not take the app down — the export still runs and reports
+    everything as unmapped, which is both true and obvious. A malformed one is logged as a
+    warning because it is a configuration mistake, not an expected state.
+    """
+    raw = (get_secret(secret_key) or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        logger.warning("%s is not valid JSON; treating every name as unmapped", secret_key, exc_info=True)
+        return {}
+    if not isinstance(parsed, dict):
+        logger.warning("%s must be a JSON object of name -> UID; got %s", secret_key, type(parsed).__name__)
+        return {}
+    return {str(k): str(v) for k, v in parsed.items() if k and v}
+
+
+def org_unit_for_lga(lga: str | None) -> str | None:
+    """The DHIS2 org unit UID for an LGA name, or None if it has no mapping.
+
+    None is a real answer, not a failure: rows logged before the LGA column existed have
+    no LGA at all. Callers must report those rather than dropping them, which is what the
+    old code did with `if not org_unit_uid: continue` — a silent partial export.
+    """
+    if not lga:
+        return None
+    return _load_uid_map("DHIS2_ORG_UNIT_MAP").get(str(lga).strip())
+
+
+def data_element_for_genus(genus: str | None) -> str | None:
+    """The DHIS2 data element UID for a genus, or None if it has no mapping."""
+    if not genus:
+        return None
+    return _load_uid_map("DHIS2_DATA_ELEMENT_MAP").get(str(genus).strip())
 
 def convert_date_to_dhis2_period(date_str):
     """
@@ -43,12 +105,31 @@ def convert_date_to_dhis2_period(date_str):
         logger.debug("Date %r not parseable; using digit-only fallback", date_str, exc_info=True)
         return "".join(filter(str.isdigit, str(date_str)))
 
-def push_vector_payload_to_dhis2(dataframe):
+def push_data_values(data_values: list, *, dry_run: bool = False, data_set: str | None = None) -> dict:
+    """POST a prebuilt list of dataValues to the instance's dataValueSets endpoint.
+
+    Takes the payload rather than building one. The previous version derived its own from a
+    wide dataframe (`LGA_District`, `Anopheles_Count`, a Mansonia column the Site Log never
+    collects) that no code in this app produced, so it was both dead and a second, divergent
+    definition of what a specimen count means. components/dashboard.py::_build_dhis2_payload
+    is the one builder now, and it counts via extract_genus_counts_from_screening — so what
+    gets submitted is what the dashboard shows.
+
+    `dry_run` sends `dryRun=true`, which validates and reports what *would* import without
+    writing. Note it is `dryRun`, not the `importMode=VALIDATE` used by the tracker API —
+    dataValueSets silently ignores the latter and performs a real import, which is a
+    dangerous way to be wrong. Verified against the demo: the response echoes the flag back
+    under `importOptions.dryRun`, so the caller can confirm it was honoured.
+
+    `data_set` names the target dataset. Supply it when a data element belongs to more than
+    one: DHIS2 then fails the whole submission with 409 "Data set detection failed, found
+    multiple sets".
+
+    Two constraints this cannot fix, both of which reject the submission at the server:
+    the period must match the dataset's period type (a Monthly dataset will not take the
+    daily YYYYMMDD periods the export produces), and the org unit must be one the dataset is
+    actually assigned to — typically a facility, not a district.
     """
-    Transforms canonical DataFrame shapes into an explicit JSON array mapping
-    and dispatches an authorized bulk transactional POST to the NHMIS endpoint.
-    """
-    # 1. Fetch encrypted pipeline credentials from environment parameters
     try:
         base_url = st.secrets["DHIS2_ENV"]["BASE_URL"].rstrip("/")
         username = st.secrets["DHIS2_ENV"]["USERNAME"]
@@ -60,78 +141,86 @@ def push_vector_payload_to_dhis2(dataframe):
         }
 
     target_endpoint = f"{base_url}/api/dataValueSets"
-    data_values_payload = []
 
-    # 2. Iteratively parse DataFrame layout rows into explicit dataValue definitions
-    for idx, row in dataframe.iterrows():
-        lga_name = row.get("LGA_District", "")
-        org_unit_uid = NIGERIA_NHMIS_ORG_UNITS.get(lga_name, None)
-
-        # Skip row processing loops if the locality can't be mapped to an authorized organizational node
-        if not org_unit_uid:
-            continue
-
-        period_string = convert_date_to_dhis2_period(row.get("Collection_Date", ""))
-
-        # Determine target fallback tracking vector column keys
-        anoph_key = "Anopheles" if "Anopheles" in dataframe.columns else "Anopheles_Count"
-        culex_key = "Culex" if "Culex" in dataframe.columns else "Culex_Count"
-        aedes_key = "Aedes" if "Aedes" in dataframe.columns else "Aedes_Count"
-        mansonia_key = "Mansonia" if "Mansonia" in dataframe.columns else "Mansonia_Count"
-        other_key = "Other_Genera" if "Other_Genera" in dataframe.columns else "Other_Genera_Count"
-
-        # Bundle structural genus metrics counts iteratively
-        genus_metrics = {
-            "Anopheles": row.get(anoph_key, 0),
-            "Culex": row.get(culex_key, 0),
-            "Aedes": row.get(aedes_key, 0),
-            "Mansonia": row.get(mansonia_key, 0),
-            "Other_Genera": row.get(other_key, 0)
-        }
-
-        for genus_name, counts in genus_metrics.items():
-            element_uid = VECTOR_DATA_ELEMENT_MAPPINGS.get(genus_name)
-            if element_uid and pd.notna(counts):
-                data_values_payload.append({
-                    "dataElement": element_uid,
-                    "period": period_string,
-                    "orgUnit": org_unit_uid,
-                    "value": str(int(counts))
-                })
-
-    if not data_values_payload:
+    # A value with no dataElement or no orgUnit cannot be imported, and DHIS2 rejects the
+    # whole set rather than the offending entry. Refuse here, naming the count, instead of
+    # sending something certain to fail — these are the unmapped LGAs and genera the
+    # exporter flags rather than drops.
+    incomplete = [
+        v for v in data_values
+        if is_unmapped(v.get("dataElement")) or is_unmapped(v.get("orgUnit"))
+    ]
+    if incomplete:
         return {
-            "status": "WARNING",
-            "message": "Zero records compiled. Verify that your field survey LGA parameters perfectly match standard organizational registries."
+            "status": "ERROR",
+            "message": (
+                f"{len(incomplete)} of {len(data_values)} values have no DHIS2 org unit or "
+                "data element UID. Map them in DHIS2_ORG_UNIT_MAP / DHIS2_DATA_ELEMENT_MAP "
+                "before submitting; nothing was sent."
+            ),
         }
 
-    # 3. Encapsulate array inside standard DHIS2 JSON parent object
-    master_payload = {"dataValues": data_values_payload}
+    if not data_values:
+        return {"status": "WARNING", "message": "Nothing to submit — the payload is empty."}
 
-    # 4. Execute programmatic transmission handshake
+    body: dict = {"dataValues": data_values}
+    if data_set:
+        body["dataSet"] = data_set
+
     try:
         response = requests.post(
             url=target_endpoint,
             headers={"Content-Type": "application/json"},
             auth=(username, password),
-            data=json.dumps(master_payload),
+            params={"dryRun": "true"} if dry_run else None,
+            data=json.dumps(body),
             timeout=35
         )
 
+        summary = _import_summary(response)
+
         if response.status_code in [200, 201]:
-            # Retain statistical output responses (imported, updated, ignored logs)
             return {
                 "status": "SUCCESS",
-                "response_json": response.json()
+                "dry_run": bool(summary.get("importOptions", {}).get("dryRun")),
+                "counts": summary.get("importCount") or {},
+                "conflicts": _conflict_messages(summary),
+                "response_json": summary,
             }
-        else:
-            return {
-                "status": "FAILURE",
-                "message": f"Server rejected submission pipeline with HTTP Error Code: {response.status_code}",
-                "details": response.text
-            }
+        # A rejected import returns its reasons in the body, and they are the only thing
+        # that says *why* — "409 Conflict" alone sent the reader back to the raw JSON.
+        return {
+            "status": "FAILURE",
+            "message": f"DHIS2 rejected the submission (HTTP {response.status_code}).",
+            "conflicts": _conflict_messages(summary),
+            "details": response.text,
+        }
 
     except requests.exceptions.Timeout:
-        return {"status": "ERROR", "message": "The remote national health database handshake execution timed out."}
+        return {"status": "ERROR", "message": "The DHIS2 server did not respond in time."}
     except Exception as err:
-        return {"status": "ERROR", "message": f"Fatal network socket disconnection: {str(err)}"}
+        logger.warning("DHIS2 submission failed", exc_info=True)
+        return {"status": "ERROR", "message": f"Could not reach the DHIS2 server: {err}"}
+
+
+def _import_summary(response) -> dict:
+    """The import summary, which DHIS2 nests under "response" on error and returns flat on
+    success. Unwrapped here so callers read one shape."""
+    try:
+        body = response.json()
+    except Exception:
+        logger.debug("DHIS2 response was not JSON", exc_info=True)
+        return {}
+    if not isinstance(body, dict):
+        return {}
+    nested = body.get("response")
+    return nested if isinstance(nested, dict) else body
+
+
+def _conflict_messages(summary: dict) -> list:
+    """Human-readable conflict strings, e.g. "Data set detection failed, found multiple
+    sets" or a period that does not match the dataset's period type."""
+    conflicts = summary.get("conflicts")
+    if not isinstance(conflicts, list):
+        return []
+    return [str(c.get("value") or c) for c in conflicts if c]

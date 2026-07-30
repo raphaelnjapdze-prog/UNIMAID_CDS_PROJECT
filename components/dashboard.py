@@ -9,7 +9,6 @@
 import csv
 import json
 import os
-import re
 from datetime import datetime
 
 import folium
@@ -24,6 +23,12 @@ from utils.data_manager import (
     extract_genus_counts_from_screening,
     extract_primary_genus,
     load_specimen_records,
+)
+from utils.dhis2_client import (
+    data_element_for_genus,
+    is_unmapped,
+    org_unit_for_lga,
+    unmapped_code,
 )
 from utils.icons import render_page_header
 from utils.logging_config import get_logger
@@ -97,68 +102,47 @@ def _extract_screening_summary(field_screening_result) -> str:
     return f"{genus} ({method_label})"
 
 
-_ORG_UNIT_UNSAFE = re.compile(r"[^A-Z0-9]+")
-
-
-def _org_unit_code(site) -> str:
-    """A placeholder org-unit key that is at least well *formed*.
-
-    Only spaces were replaced before, so a breeding site type like
-    "Rice Field / Irrigated Field" produced `SITE_RICE_FIELD_/_IRRIGATED_FIELD` — a slash
-    inside an identifier, which DHIS2 rejects on import. Every run of non-alphanumerics
-    collapses to a single underscore instead.
-
-    Still a placeholder keyed on breeding_site_type, not a real DHIS2 UID: the actual
-    registry mapping lives in `utils/dhis2_client.py::NIGERIA_NHMIS_ORG_UNITS`.
-    """
-    cleaned = _ORG_UNIT_UNSAFE.sub("_", str(site or "UNSPECIFIED").upper()).strip("_")
-    return f"SITE_{cleaned or 'UNSPECIFIED'}"
-
-
 def _build_dhis2_payload(df: pd.DataFrame) -> str:
-    """
-    Aggregates real specimen counts by collection date and breeding site
-    type into a WHO-style DHIS2 DataValueSet. Org unit codes are derived
-    from breeding_site_type as a placeholder grouping key — an admin
-    should map these to real DHIS2 facility/org unit codes before this
-    is used for an actual submission.
+    """Aggregate real specimen counts into a DHIS2 DataValueSet, keyed (date, LGA, genus).
+
+    Org unit and data element UIDs come from the operator's configured mappings; a name
+    with no mapping is written as a visible UNMAPPED_ code, never omitted.
     """
     if df.empty:
         return json.dumps({"dataValues": []}, indent=2)
 
-    # Counted with extract_genus_counts_from_screening, not by counting rows. A row is not a
-    # specimen: a manual_field_log row is a whole batch holding raw genus counts, and it
-    # resolves to no single genus, so grouping on extract_primary_genus dropped every batch
-    # from the export. A batch of 500 with 100 vialed out reported 100 to DHIS2 and lost the
-    # other 400. This is the same helper the dashboard totals use, so the export and the
-    # figures on screen now agree, and it nets out vialed_out so a batch and its children are
-    # never both counted.
+    # Two things this deliberately does not do.
+    #
+    # It does not count rows. A row is not a specimen: a manual_field_log row is a whole
+    # batch holding raw genus counts, and it resolves to no single genus, so grouping on
+    # extract_primary_genus dropped every batch from the export — a batch of 500 with 100
+    # vialed out reported 100 and lost the other 400. extract_genus_counts_from_screening
+    # is the same helper the on-screen totals use, so export and dashboard agree, and it
+    # nets out vialed_out so a batch and its children are never both counted.
+    #
+    # And it does not group by breeding_site_type. A DHIS2 org unit is a *place*; a habitat
+    # category is not one, so that key produced identifiers ("SITE_RICE_FIELD…") no instance
+    # could match. Habitat stays on every row for analysis here — it is simply not the
+    # dimension DHIS2 aggregates by.
     totals: dict[tuple, int] = {}
     for _, row in df.iterrows():
         counts = extract_genus_counts_from_screening(row.get("field_screening_result"))
         if not counts:
             continue
         for genus, count in counts.items():
-            key = (row.get("collection_date"), row.get("breeding_site_type"), genus)
+            key = (row.get("collection_date"), row.get("lga"), genus)
             totals[key] = totals.get(key, 0) + int(count)
 
-    # "Other" is a real category the batch counter reports (other_genera_count); it gets its
-    # own code rather than the unmapped fallback, which would merge "genera we don't break
-    # out" with "genus we failed to recognise" — two different things to whoever reads this.
-    element_map = {
-        "Anopheles": "ZVD_LDI_001",
-        "Culex": "ZVD_LDI_002",
-        "Aedes": "ZVD_LDI_003",
-        "Other": "ZVD_LDI_004",
-    }
-
     data_values = []
-    for (date, site, genus), count in sorted(totals.items(), key=lambda kv: str(kv[0])):
+    for (date, lga, genus), count in sorted(totals.items(), key=lambda kv: str(kv[0])):
         period = pd.to_datetime(date).strftime("%Y%m%d") if pd.notna(date) else datetime.now().strftime("%Y%m%d")
+        # Real UIDs when the operator has mapped them, a visible UNMAPPED_ placeholder when
+        # not. Never a silent omission: a row logged before the LGA column existed has no
+        # place at all, and dropping it would quietly shrink the submitted totals.
         data_values.append({
-            "dataElement": element_map.get(genus, "ZVD_LDI_999"),
+            "dataElement": data_element_for_genus(genus) or unmapped_code("genus", genus),
             "period": period,
-            "orgUnit": _org_unit_code(site),
+            "orgUnit": org_unit_for_lga(lga) or unmapped_code("lga", lga),
             "value": str(int(count)),
         })
 
@@ -179,6 +163,24 @@ def _payload_value_count(payload: str) -> int:
         return 0
 
 
+def _unmapped_names(payload: str) -> set[str]:
+    """The org units and data elements in the payload that have no real DHIS2 UID.
+
+    Read back out of the built payload rather than tracked alongside it, so the warning can
+    never disagree with the file the operator downloads.
+    """
+    try:
+        values = json.loads(payload).get("dataValues", [])
+    except Exception:
+        logger.debug("Could not scan the DHIS2 payload for unmapped codes", exc_info=True)
+        return set()
+    return {
+        uid for value in values
+        for uid in (value.get("orgUnit"), value.get("dataElement"))
+        if is_unmapped(uid)
+    }
+
+
 def _render_dhis2_payload_preview() -> None:
     """Show the generated DHIS2 payload full-width, below the header.
 
@@ -190,12 +192,22 @@ def _render_dhis2_payload_preview() -> None:
         return
 
     count = _payload_value_count(payload)
+    unmapped = _unmapped_names(payload)
+
     with st.expander(f"DHIS2 payload — {count} data value(s)", expanded=False):
         st.caption(
-            "Org unit and data element codes are placeholders derived from "
-            "breeding_site_type — map them to your instance's real DHIS2 UIDs before "
-            "submitting. Aggregated by collection date, site type, and genus."
+            "Aggregated by collection date, LGA, and genus. Org units are LGAs, because a "
+            "DHIS2 org unit is a place; breeding site type is recorded per row but is not "
+            "the dimension DHIS2 aggregates by."
         )
+        if unmapped:
+            st.warning(
+                "No DHIS2 UID for: **" + "**, **".join(sorted(unmapped)) + "**. These "
+                "appear as `UNMAPPED_…` in the payload rather than being dropped, so the "
+                "totals stay complete — but DHIS2 will reject the set until they are "
+                "mapped. Set `DHIS2_ORG_UNIT_MAP` and `DHIS2_DATA_ELEMENT_MAP` in secrets; "
+                "`python scripts/fetch_dhis2_uids.py` prints the UIDs your instance uses."
+            )
         st.code(payload, language="json", height=320, wrap_lines=True)
         if st.button("Clear payload", width="content"):
             st.session_state.pop("dhis2_payload", None)

@@ -24,6 +24,7 @@ from utils.data_manager import (
     sync_pending_writes,
     vial_out_specimens,
 )
+from utils.geography import BORNO_LGAS, DEFAULT_LGA
 from utils.icons import render_page_header
 from utils.offline_queue import clear_quarantine, get_quarantine, pending_count
 from utils.pcr_and_accuracy import render_specimen_qr
@@ -170,6 +171,11 @@ def render_site_log_page():
 
         with col1:
             collection_date = st.date_input("Collection date", value=date.today())
+            lga = st.selectbox(
+                "LGA", BORNO_LGAS, index=BORNO_LGAS.index(DEFAULT_LGA),
+                help="Local Government Area of this collection. Becomes the org unit on "
+                     "the DHIS2 export — a habitat type cannot serve as one.",
+            )
             breeding_site_type = st.selectbox("Breeding site type", _BREEDING_SITE_OPTIONS)
 
         with col2:
@@ -203,6 +209,7 @@ def render_site_log_page():
                     saved = submit_site_log_entry(
                         collection_date=collection_date,
                         breeding_site_type=breeding_site_type,
+                        lga=lga,
                         gps_lat=gps_lat,
                         gps_lon=gps_lon,
                         anopheles_count=anopheles_count,
