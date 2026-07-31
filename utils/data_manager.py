@@ -514,8 +514,13 @@ def fetch_batch_children(batch_specimen_id: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 
-def _as_screening_dict(field_screening_result) -> dict:
-    """field_screening_result as a dict, whether it arrived as one or as a JSON string."""
+def as_screening_dict(field_screening_result) -> dict:
+    """field_screening_result as a dict, whether it arrived as one or as a JSON string.
+
+    Public because the column is JSONB and does not always arrive parsed, so every reader
+    needs this, not just this module. Pages that isinstance-checked for a dict instead
+    silently treated a string row as having no screening method at all.
+    """
     if isinstance(field_screening_result, str):
         try:
             field_screening_result = json.loads(field_screening_result)
@@ -535,7 +540,7 @@ def subsampled_genus_of(field_screening_result) -> str | None:
     Both the identification path and the delete path need that original genus — the
     batch's vialed_out tally is keyed by it — so it is read in exactly one place.
     """
-    screening = _as_screening_dict(field_screening_result)
+    screening = as_screening_dict(field_screening_result)
     if screening.get("screening_method") == "field_subsample":
         genus = (screening.get("result") or {}).get("genus")
     else:
@@ -545,7 +550,7 @@ def subsampled_genus_of(field_screening_result) -> str | None:
 
 def summarise_vialed_child(row: dict) -> dict:
     """One vialed-out individual, described for display under its parent batch."""
-    screening = _as_screening_dict(row.get("field_screening_result"))
+    screening = as_screening_dict(row.get("field_screening_result"))
     method = screening.get("screening_method")
 
     # The genus is known from the pile it was vialed out of, even before anyone identifies
@@ -607,7 +612,7 @@ def build_collection_events(df: pd.DataFrame) -> tuple[list[dict], pd.DataFrame]
     accounted: set[str] = set()
 
     for row in rows:
-        screening = _as_screening_dict(row.get("field_screening_result"))
+        screening = as_screening_dict(row.get("field_screening_result"))
         if screening.get("screening_method") != "manual_field_log":
             continue
 
@@ -667,7 +672,7 @@ def specimens_ready_for_pcr(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     identified = df["field_screening_result"].apply(
-        lambda fs: _as_screening_dict(fs).get("screening_method") in IDENTIFICATION_METHODS
+        lambda fs: as_screening_dict(fs).get("screening_method") in IDENTIFICATION_METHODS
     )
     out = df[identified].copy()
     if "collection_date" in out.columns:
@@ -699,7 +704,7 @@ def pcr_specimen_label(row: dict) -> str:
     A bare UUID tells lab staff nothing about which tube is in their hand, so lead with
     the tube label and the identification.
     """
-    screening = _as_screening_dict(row.get("field_screening_result"))
+    screening = as_screening_dict(row.get("field_screening_result"))
     genus = extract_primary_genus(screening) or "undetermined"
     # A row from DataFrame.to_dict("records") carries a missing tube_label / date as a
     # float NaN, which is truthy — so `[tube] if tube else []` kept the NaN and
@@ -1044,7 +1049,7 @@ def _restore_vialed_out(parent_id: str, genus_counts: dict) -> bool:
         # tally left to correct and nothing was lost — the children went with it.
         return True
 
-    screening = _as_screening_dict(parent.get("field_screening_result"))
+    screening = as_screening_dict(parent.get("field_screening_result"))
     if screening.get("screening_method") != "manual_field_log":
         logger.warning("Parent %s is not a field-count log; no tally to restore", parent_id)
         return False
@@ -1118,7 +1123,7 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
     doomed = {row["specimen_id"]: row for row in rows if row.get("specimen_id")}
     batch_ids = [
         sid for sid, row in doomed.items()
-        if _as_screening_dict(row.get("field_screening_result")).get("screening_method") == "manual_field_log"
+        if as_screening_dict(row.get("field_screening_result")).get("screening_method") == "manual_field_log"
     ]
     for child in _fetch_children_of(batch_ids):
         child_id = child.get("specimen_id")
@@ -1418,7 +1423,7 @@ def extract_genus_counts_from_screening(field_screening_result: dict | None) -> 
     # Decode a JSON string the same way extract_primary_genus does. The column is JSONB and
     # usually arrives parsed, but not always, and returning {} for a string silently dropped
     # every specimen on that row — an undercount that looks like an empty collection.
-    field_screening_result = _as_screening_dict(field_screening_result)
+    field_screening_result = as_screening_dict(field_screening_result)
     if not field_screening_result:
         return {}
 

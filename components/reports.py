@@ -17,6 +17,7 @@ from openpyxl.utils import get_column_letter
 
 from utils.data_manager import (
     add_collector_column,
+    as_screening_dict,
     classify_resistance_status,
     compute_mortality_percentage,
     extract_genus_counts_from_screening,
@@ -61,8 +62,12 @@ def _flatten_specimen_df(df: pd.DataFrame) -> pd.DataFrame:
         counts = extract_genus_counts_from_screening(row.get("field_screening_result"))
         for g in genus_totals:
             genus_totals[g].append(counts.get(g, 0))
-        result = row.get("field_screening_result")
-        methods.append(result.get("screening_method") if isinstance(result, dict) else None)
+        # Decoded rather than isinstance-checked: field_screening_result is JSONB and does
+        # not always arrive parsed, and a string yielded screening_method=None — a blank
+        # column in the report and the export, with nothing to indicate it was a parse
+        # miss rather than a record genuinely lacking a method.
+        result = as_screening_dict(row.get("field_screening_result"))
+        methods.append(result.get("screening_method") or None)
 
     for g, values in genus_totals.items():
         out[g] = values
@@ -84,7 +89,14 @@ def _compile_specimen_excel(df: pd.DataFrame) -> io.BytesIO:
     genus_totals = df[genus_cols].sum() if genus_cols else pd.Series(dtype=float)
     pcr_counts = df["pcr_status"].value_counts() if "pcr_status" in df.columns else pd.Series(dtype=int)
 
-    summary_rows = [("Total Specimens Logged", total_records)]
+    # Records and specimens are different numbers, and the summary used to report the row
+    # count under "Total Specimens Logged". One manual_field_log row is a whole batch — 500
+    # mosquitoes on one row — so that headline could read 3 for a catch of 1,570 while the
+    # per-genus totals beneath it, which are summed counts, said otherwise.
+    summary_rows = [
+        ("Total Specimens Caught", int(genus_totals.sum()) if genus_cols else 0),
+        ("Records (collection events + identifications)", total_records),
+    ]
     for g in genus_cols:
         summary_rows.append((f"Total {g} Count", int(genus_totals.get(g, 0))))
     for status, count in pcr_counts.items():
@@ -97,6 +109,13 @@ def _compile_specimen_excel(df: pd.DataFrame) -> io.BytesIO:
         site_breakdown = df.groupby(df["breeding_site_type"].fillna("Unspecified"))[genus_cols].sum().reset_index()
         site_breakdown.columns = ["Breeding Site Type"] + genus_cols
 
+    # Per-LGA counts: the breakdown a health authority actually reports on, and the one that
+    # lines up with what the DHIS2 export submits.
+    lga_breakdown = pd.DataFrame()
+    if "lga" in df.columns and genus_cols:
+        lga_breakdown = df.groupby(df["lga"].fillna("Not recorded"))[genus_cols].sum().reset_index()
+        lga_breakdown.columns = ["LGA"] + genus_cols
+
     # Resolve the collector name BEFORE dropping field_screening_result — the readable
     # label lives inside that JSON, so dropping it first would leave only a bare UUID in
     # the exported sheet.
@@ -108,6 +127,8 @@ def _compile_specimen_excel(df: pd.DataFrame) -> io.BytesIO:
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         summary_df.to_excel(writer, sheet_name="Executive_Summary", index=False)
+        if not lga_breakdown.empty:
+            lga_breakdown.to_excel(writer, sheet_name="LGA_Breakdown", index=False)
         if not site_breakdown.empty:
             site_breakdown.to_excel(writer, sheet_name="Site_Type_Breakdown", index=False)
         raw_export.to_excel(writer, sheet_name="Raw_Records", index=False)
@@ -177,7 +198,7 @@ def render_reports_page():
             valid_dates = df.dropna(subset=["collection_date"])
 
             st.subheader("Filters")
-            fcol1, fcol2, fcol3 = st.columns(3)
+            fcol1, fcol2, fcol3, fcol4 = st.columns(4)
 
             with fcol1:
                 if not valid_dates.empty:
@@ -206,6 +227,12 @@ def render_reports_page():
                 selected_sites = st.multiselect("Breeding site type (all if empty)", site_options)
 
             with fcol3:
+                # LGA is the dimension health reporting is organised by — it is what the
+                # DHIS2 export aggregates to — so it belongs alongside habitat here.
+                lga_options = sorted(df["lga"].dropna().unique()) if "lga" in df.columns else []
+                selected_lgas = st.multiselect("LGA (all if empty)", lga_options)
+
+            with fcol4:
                 pcr_options = sorted(df["pcr_status"].dropna().unique()) if "pcr_status" in df.columns else []
                 selected_pcr = st.multiselect("PCR status (all if empty)", pcr_options)
 
@@ -215,6 +242,8 @@ def render_reports_page():
                 processed = processed[mask]
             if selected_sites:
                 processed = processed[processed["breeding_site_type"].isin(selected_sites)]
+            if selected_lgas:
+                processed = processed[processed["lga"].isin(selected_lgas)]
             if selected_pcr:
                 processed = processed[processed["pcr_status"].isin(selected_pcr)]
 
@@ -237,7 +266,7 @@ def render_reports_page():
 
                 shown = add_collector_column(processed)
                 display_cols = [c for c in [
-                    "collection_date", "breeding_site_type", "screening_method", "Collector",
+                    "collection_date", "lga", "breeding_site_type", "screening_method", "Collector",
                     "Anopheles", "Culex", "Aedes", "Other", "pcr_status", "pcr_confirmed_species",
                 ] if c in shown.columns]
                 st.dataframe(shown[display_cols].head(20), width="stretch")

@@ -84,24 +84,38 @@ def _extract_genus(field_screening_result) -> str | None:
     return extract_primary_genus(field_screening_result)
 
 
-def _extract_screening_summary(field_screening_result) -> str:
-    """Short human-readable summary for map popups — honest, not padded."""
-    if not field_screening_result:
-        return "No screening result recorded."
-    if isinstance(field_screening_result, str):
-        try:
-            field_screening_result = json.loads(field_screening_result)
-        except Exception:
-            return "Screening result could not be parsed."
+def _collection_points(map_data: pd.DataFrame) -> list[dict]:
+    """One entry per distinct coordinate, with the specimens caught there.
 
-    method = field_screening_result.get("screening_method", "unknown method")
-    genus = _extract_genus(field_screening_result) or "Undetermined"
-    method_label = {
-        "manual_checklist": "Checklist",
-        "ai_vision": "AI vision screening",
-        "trained_classifier": "Trained classifier",
-    }.get(method, method)
-    return f"{genus} ({method_label})"
+    Not one per row. A vialed-out individual inherits its batch's coordinates verbatim
+    (vial_out_specimens copies them), so a batch of 500 with 100 vialed out drew 101 markers
+    stacked on a single point — the map became slower and less readable with every specimen
+    processed, which is backwards.
+
+    Counts come from extract_genus_counts_from_screening, the same helper as the dashboard
+    totals and the DHIS2 export, so a point shows the catch rather than the row count, and
+    the batch's netted-out vialed_out means its children are not counted twice.
+    """
+    points: dict[tuple, dict] = {}
+    for _, row in map_data.iterrows():
+        key = (row["gps_lat"], row["gps_lon"])
+        point = points.setdefault(key, {
+            "lat": row["gps_lat"], "lon": row["gps_lon"],
+            "counts": {}, "records": 0, "photo": None,
+            "sites": set(), "lgas": set(), "pcr": set(),
+        })
+        point["records"] += 1
+        for genus, count in extract_genus_counts_from_screening(row.get("field_screening_result")).items():
+            point["counts"][genus] = point["counts"].get(genus, 0) + count
+        if site := row.get("breeding_site_type"):
+            point["sites"].add(str(site))
+        if lga := row.get("lga"):
+            point["lgas"].add(str(lga))
+        point["pcr"].add(row.get("pcr_status") or "not_submitted")
+        photos = row.get("photo_urls")
+        if point["photo"] is None and isinstance(photos, list) and photos:
+            point["photo"] = photos[0]
+    return list(points.values())
 
 
 def _build_dhis2_payload(df: pd.DataFrame) -> str:
@@ -462,34 +476,52 @@ def render_dashboard_page():
         center_lon = map_data["gps_lon"].mean()
         m = folium.Map(location=[center_lat, center_lon], zoom_start=12, tiles="OpenStreetMap")
 
-        for _, row in map_data.iterrows():
-            summary = _extract_screening_summary(row.get("field_screening_result"))
-            site = row.get("breeding_site_type") or "Unspecified site"
-            pcr = row.get("pcr_status", "not_submitted")
-            photos = row.get("photo_urls") or []
+        for point in _collection_points(map_data):
+            total = sum(point["counts"].values())
+            # The catch, by genus. A batch row reports its whole collection here, where the
+            # old popup asked for one genus, got None, and labelled the site "Undetermined"
+            # — on precisely the rows holding the counts.
+            breakdown = "<br>".join(
+                f"&nbsp;&nbsp;{genus}: <b>{count:,}</b>"
+                for genus, count in sorted(point["counts"].items(), key=lambda kv: -kv[1])
+            ) or "&nbsp;&nbsp;<i>none resolved</i>"
+
             photo_html = ""
-            if photos and isinstance(photos, list) and len(photos) > 0:
+            if point["photo"]:
                 photo_html = (
-                    f'<img src="{photos[0]}" width="100%" '
+                    f'<img src="{point["photo"]}" width="100%" '
                     f'style="max-height:110px; object-fit:cover; margin-top:6px; border-radius:4px;" />'
                 )
+            place = " · ".join(sorted(point["lgas"])) or "LGA not recorded"
+            sites = " · ".join(sorted(point["sites"])) or "Unspecified site"
+            records = point["records"]
 
             popup_html = f"""
-            <div style='font-family:Arial,sans-serif; width:190px; font-size:12px; line-height:1.4;'>
-                <b>{site}</b><br>
-                Screening: {summary}<br>
-                PCR status: {pcr}
+            <div style='font-family:Arial,sans-serif; width:200px; font-size:12px; line-height:1.45;'>
+                <b>{sites}</b><br>
+                <span style='color:#64748b;'>{place}</span><br>
+                <b>{total:,}</b> specimen(s) from {records} record(s):<br>
+                {breakdown}
                 {photo_html}
             </div>
             """
-            pcr_color = "green" if pcr == "confirmed" else "orange" if pcr == "pending" else "cadetblue"
+            # Colour by the best PCR status at the point: one confirmed specimen is the
+            # informative fact, and it would be hidden if a later unsubmitted row won.
+            pcr_color = (
+                "green" if "confirmed" in point["pcr"]
+                else "orange" if "pending" in point["pcr"]
+                else "cadetblue"
+            )
             folium.Marker(
-                location=[row["gps_lat"], row["gps_lon"]],
-                popup=folium.Popup(popup_html, max_width=220),
+                location=[point["lat"], point["lon"]],
+                popup=folium.Popup(popup_html, max_width=240),
+                tooltip=f"{total:,} specimen(s)",
                 icon=folium.Icon(color=pcr_color, icon="tint"),
             ).add_to(m)
 
-        st_folium(m, width=1100, height=520, returned_objects=[])
+        # use_container_width, not width=1100: a fixed pixel width wider than the viewport
+        # made the whole page scroll sideways on a phone.
+        st_folium(m, use_container_width=True, height=520, returned_objects=[])
     else:
         st.info("No specimen records have GPS coordinates recorded yet.")
 
