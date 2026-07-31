@@ -45,7 +45,10 @@ def _map(monkeypatch, org_units=None, data_elements=None):
     monkeypatch.setattr(dhis2, "_load_uid_map", lambda key: maps.get(key, {}))
 
 
-def _batch(anopheles=0, culex=0, aedes=0, other=0, vialed=None, lga=LGA):
+# lga is genuinely nullable: rows logged before the column existed carry none, and
+# test_a_row_with_no_lga_still_exports passes None deliberately. Annotated rather than left
+# to inference, which reads `str` from the default and rejects that case.
+def _batch(anopheles=0, culex=0, aedes=0, other=0, vialed=None, lga: str | None = LGA):
     result = {
         "anopheles_count": anopheles, "culex_count": culex,
         "aedes_count": aedes, "other_genera_count": other,
@@ -58,7 +61,7 @@ def _batch(anopheles=0, culex=0, aedes=0, other=0, vialed=None, lga=LGA):
     }
 
 
-def _vialed(genus, lga=LGA):
+def _vialed(genus, lga: str | None = LGA):
     return {
         "collection_date": DATE, "breeding_site_type": SITE, "lga": lga,
         "field_screening_result": {"screening_method": "field_subsample", "result": {"genus": genus}},
