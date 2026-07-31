@@ -160,8 +160,65 @@ def test_lga_names_containing_slashes_survive_as_identifiers():
     assert all(c.isalnum() or c == "_" for c in code)
 
 
-def test_period_is_an_eight_digit_day():
-    assert _values([_batch(anopheles=1)])[0]["period"] == "20260728"
+# ---------------------------------------------------------------------------
+# Period type: a property of the target dataset, not of a mosquito.
+# ---------------------------------------------------------------------------
+def _period_type(monkeypatch, value):
+    monkeypatch.setattr(dhis2, "get_secret", lambda key: value if key == "DHIS2_PERIOD_TYPE" else "")
+
+
+def test_the_default_period_is_monthly():
+    """Aggregate HMIS reporting is monthly, and the export used to emit daily regardless."""
+    assert _values([_batch(anopheles=1)])[0]["period"] == "202607"
+
+
+@pytest.mark.parametrize("configured, expected", [
+    ("Daily", "20260728"),
+    ("Monthly", "202607"),
+    ("Weekly", "2026W31"),
+    ("monthly", "202607"),      # case is normalised
+    ("nonsense", "202607"),     # unrecognised falls back to the default
+    ("", "202607"),
+])
+def test_period_follows_the_configured_type(monkeypatch, configured, expected):
+    _period_type(monkeypatch, configured)
+
+    assert _values([_batch(anopheles=1)])[0]["period"] == expected
+
+
+def test_two_collections_in_one_month_become_one_value(monkeypatch):
+    """(dataElement, period, orgUnit) is a data value's identity in DHIS2.
+
+    Keyed on the collection date, two collections in the same month emitted two values with
+    identical identity, and the server keeps whichever arrives last — an export that looks
+    complete while reporting one collection's catch. They must be summed instead.
+    """
+    _period_type(monkeypatch, "Monthly")
+    early = _batch(anopheles=30)
+    late = _batch(anopheles=12)
+    late["collection_date"] = "2026-07-02"
+
+    values = _values([early, late])
+    assert len(values) == 1, "same month, same LGA, same genus must be one value"
+    assert int(values[0]["value"]) == 42
+
+
+def test_different_months_stay_separate(monkeypatch):
+    _period_type(monkeypatch, "Monthly")
+    august = _batch(anopheles=5)
+    august["collection_date"] = "2026-08-03"
+
+    periods = {v["period"] for v in _values([_batch(anopheles=1), august])}
+    assert periods == {"202607", "202608"}
+
+
+def test_weekly_periods_use_the_iso_year_across_a_new_year(monkeypatch):
+    """2026-12-31 falls in ISO week 53 of 2026; the calendar year would file it as 2027."""
+    _period_type(monkeypatch, "Weekly")
+    row = _batch(anopheles=1)
+    row["collection_date"] = "2027-01-01"
+
+    assert _values([row])[0]["period"] == "2026W53"
 
 
 def test_unmapped_names_are_reported_to_the_operator():

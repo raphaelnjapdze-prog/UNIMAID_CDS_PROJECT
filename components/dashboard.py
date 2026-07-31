@@ -25,6 +25,8 @@ from utils.data_manager import (
     load_specimen_records,
 )
 from utils.dhis2_client import (
+    configured_period_type,
+    convert_date_to_dhis2_period,
     data_element_for_genus,
     is_unmapped,
     org_unit_for_lga,
@@ -103,10 +105,11 @@ def _extract_screening_summary(field_screening_result) -> str:
 
 
 def _build_dhis2_payload(df: pd.DataFrame) -> str:
-    """Aggregate real specimen counts into a DHIS2 DataValueSet, keyed (date, LGA, genus).
+    """Aggregate real specimen counts into a DHIS2 DataValueSet, keyed (period, LGA, genus).
 
     Org unit and data element UIDs come from the operator's configured mappings; a name
-    with no mapping is written as a visible UNMAPPED_ code, never omitted.
+    with no mapping is written as a visible UNMAPPED_ code, never omitted. The period type
+    (Monthly by default) comes from DHIS2_PERIOD_TYPE.
     """
     if df.empty:
         return json.dumps({"dataValues": []}, indent=2)
@@ -124,18 +127,28 @@ def _build_dhis2_payload(df: pd.DataFrame) -> str:
     # category is not one, so that key produced identifiers ("SITE_RICE_FIELD…") no instance
     # could match. Habitat stays on every row for analysis here — it is simply not the
     # dimension DHIS2 aggregates by.
+    # Keyed on the PERIOD, not the collection date. (dataElement, period, orgUnit) is the
+    # identity of a DHIS2 data value, so under a monthly period type two collections in the
+    # same month at the same LGA are one value — summed here. Keying on the date instead
+    # would emit two values with identical identity, and the server keeps whichever arrives
+    # last: the export would look complete and silently report one collection's catch.
+    period_type = configured_period_type()
     totals: dict[tuple, int] = {}
     for _, row in df.iterrows():
         counts = extract_genus_counts_from_screening(row.get("field_screening_result"))
         if not counts:
             continue
+        date = row.get("collection_date")
+        period = (
+            convert_date_to_dhis2_period(date, period_type) if pd.notna(date)
+            else convert_date_to_dhis2_period(datetime.now(), period_type)
+        )
         for genus, count in counts.items():
-            key = (row.get("collection_date"), row.get("lga"), genus)
+            key = (period, row.get("lga"), genus)
             totals[key] = totals.get(key, 0) + int(count)
 
     data_values = []
-    for (date, lga, genus), count in sorted(totals.items(), key=lambda kv: str(kv[0])):
-        period = pd.to_datetime(date).strftime("%Y%m%d") if pd.notna(date) else datetime.now().strftime("%Y%m%d")
+    for (period, lga, genus), count in sorted(totals.items(), key=lambda kv: str(kv[0])):
         # Real UIDs when the operator has mapped them, a visible UNMAPPED_ placeholder when
         # not. Never a silent omission: a row logged before the LGA column existed has no
         # place at all, and dropping it would quietly shrink the submitted totals.
@@ -196,9 +209,10 @@ def _render_dhis2_payload_preview() -> None:
 
     with st.expander(f"DHIS2 payload — {count} data value(s)", expanded=False):
         st.caption(
-            "Aggregated by collection date, LGA, and genus. Org units are LGAs, because a "
-            "DHIS2 org unit is a place; breeding site type is recorded per row but is not "
-            "the dimension DHIS2 aggregates by."
+            f"Aggregated by **{configured_period_type().lower()}** period, LGA, and genus. "
+            "Org units are LGAs, because a DHIS2 org unit is a place; breeding site type is "
+            "recorded per row but is not the dimension DHIS2 aggregates by. The period type "
+            "must match the target dataset's — set `DHIS2_PERIOD_TYPE` if yours differs."
         )
         if unmapped:
             st.warning(

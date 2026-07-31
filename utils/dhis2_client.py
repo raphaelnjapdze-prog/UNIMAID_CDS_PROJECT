@@ -91,19 +91,58 @@ def data_element_for_genus(genus: str | None) -> str | None:
         return None
     return _load_uid_map("DHIS2_DATA_ELEMENT_MAP").get(str(genus).strip())
 
-def convert_date_to_dhis2_period(date_str):
+# DHIS2 period types this export can emit, and how each is written.
+#
+# Which one is correct is not a property of a mosquito — it is a property of the dataset
+# being submitted to, like the UIDs, so it is configuration (DHIS2_PERIOD_TYPE) rather than
+# a decision baked in here. A value whose period does not match its dataset's periodType is
+# rejected by the server, and the export previously emitted daily periods unconditionally.
+#
+# Monthly is the default because aggregate HMIS reporting — including every malaria dataset
+# on the DHIS2 demo — is monthly. Weekly exists because vector surveillance is often
+# reported on epidemiological weeks. Daily is kept for instances that really do collect at
+# that resolution.
+PERIOD_TYPES = ("Daily", "Weekly", "Monthly")
+DEFAULT_PERIOD_TYPE = "Monthly"
+
+
+def configured_period_type() -> str:
+    """The DHIS2 period type to emit. Falls back to Monthly on anything unrecognised."""
+    raw = (get_secret("DHIS2_PERIOD_TYPE") or "").strip().capitalize()
+    if raw and raw not in PERIOD_TYPES:
+        logger.warning(
+            "DHIS2_PERIOD_TYPE %r is not one of %s; using %s",
+            raw, ", ".join(PERIOD_TYPES), DEFAULT_PERIOD_TYPE,
+        )
+    return raw if raw in PERIOD_TYPES else DEFAULT_PERIOD_TYPE
+
+
+def convert_date_to_dhis2_period(date_str, period_type: str | None = None) -> str:
+    """A collection date as a DHIS2 period string of the configured type.
+
+    Daily   -> 20260728
+    Weekly  -> 2026W31   (ISO week, and the ISO *year*, which differs from the calendar
+                          year across a New Year boundary — 2026-12-31 is 2026W53, but
+                          2027-01-01 is also 2026W53, and getting that wrong silently files
+                          a week's catch under the wrong year)
+    Monthly -> 202607
+
+    An unparseable date keeps the old digits-only fallback rather than raising: it produces
+    something the server will reject loudly, which beats dropping the row.
     """
-    Normalizes a standard YYYY-MM-DD date vector into a valid DHIS2
-    reporting period format. Default configuration uses daily tracking string formats.
-    """
+    period_type = period_type or configured_period_type()
     try:
-        parsed_date = pd.to_datetime(date_str)
-        # Formats to standard daily parameter ('YYYYMMDD')
-        # If your national DHIS2 instance uses monthly reporting aggregates, use: .strftime('%Y%m')
-        return parsed_date.strftime('%Y%m%d')
+        parsed = pd.to_datetime(date_str)
     except Exception:
         logger.debug("Date %r not parseable; using digit-only fallback", date_str, exc_info=True)
         return "".join(filter(str.isdigit, str(date_str)))
+
+    if period_type == "Daily":
+        return parsed.strftime("%Y%m%d")
+    if period_type == "Weekly":
+        iso = parsed.isocalendar()
+        return f"{iso[0]}W{iso[1]}"
+    return parsed.strftime("%Y%m")
 
 def push_data_values(data_values: list, *, dry_run: bool = False, data_set: str | None = None) -> dict:
     """POST a prebuilt list of dataValues to the instance's dataValueSets endpoint.
