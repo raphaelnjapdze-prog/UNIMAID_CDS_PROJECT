@@ -130,21 +130,16 @@ def push_data_values(data_values: list, *, dry_run: bool = False, data_set: str 
     daily YYYYMMDD periods the export produces), and the org unit must be one the dataset is
     actually assigned to — typically a facility, not a district.
     """
-    try:
-        base_url = st.secrets["DHIS2_ENV"]["BASE_URL"].rstrip("/")
-        username = st.secrets["DHIS2_ENV"]["USERNAME"]
-        password = st.secrets["DHIS2_ENV"]["PASSWORD"]
-    except Exception:
-        return {
-            "status": "ERROR",
-            "message": "Missing authorized DHIS2 authentication variables inside configurations parameters environment."
-        }
+    # The payload is checked BEFORE the credentials, because whether it is submittable does
+    # not depend on having any. Checking auth first meant an unconfigured instance reported
+    # "missing credentials" for a payload that was itself unsendable — the wrong problem —
+    # and it put the guard against submitting garbage behind having somewhere to submit to.
+    if not data_values:
+        return {"status": "WARNING", "message": "Nothing to submit — the payload is empty."}
 
-    target_endpoint = f"{base_url}/api/dataValueSets"
-
-    # A value with no dataElement or no orgUnit cannot be imported, and DHIS2 rejects the
-    # whole set rather than the offending entry. Refuse here, naming the count, instead of
-    # sending something certain to fail — these are the unmapped LGAs and genera the
+    # A value with an unmapped dataElement or orgUnit cannot be imported, and DHIS2 rejects
+    # the whole set rather than the offending entry. Refuse here, naming the count, instead
+    # of sending something certain to fail — these are the unmapped LGAs and genera the
     # exporter flags rather than drops.
     incomplete = [
         v for v in data_values
@@ -160,8 +155,17 @@ def push_data_values(data_values: list, *, dry_run: bool = False, data_set: str 
             ),
         }
 
-    if not data_values:
-        return {"status": "WARNING", "message": "Nothing to submit — the payload is empty."}
+    try:
+        base_url = st.secrets["DHIS2_ENV"]["BASE_URL"].rstrip("/")
+        username = st.secrets["DHIS2_ENV"]["USERNAME"]
+        password = st.secrets["DHIS2_ENV"]["PASSWORD"]
+    except Exception:
+        return {
+            "status": "ERROR",
+            "message": "No DHIS2 server is configured — set DHIS2_ENV in secrets before submitting.",
+        }
+
+    target_endpoint = f"{base_url}/api/dataValueSets"
 
     body: dict = {"dataValues": data_values}
     if data_set:

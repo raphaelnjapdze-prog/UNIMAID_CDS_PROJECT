@@ -177,16 +177,52 @@ def test_nothing_is_reported_unmapped_once_everything_is_mapped(monkeypatch):
 # ---------------------------------------------------------------------------
 # The submit path refuses what DHIS2 would reject wholesale.
 # ---------------------------------------------------------------------------
-def test_push_refuses_a_payload_with_unmapped_codes():
-    """DHIS2 rejects the whole set, not the offending value, so failing here is kinder."""
-    result = dhis2.push_data_values([
-        {"dataElement": "s46m5MS0hxu", "period": "20260728",
-         "orgUnit": "UNMAPPED_LGA_JERE", "value": "7"},
-    ])
+UNMAPPED_VALUE = [
+    {"dataElement": "s46m5MS0hxu", "period": "20260728",
+     "orgUnit": "UNMAPPED_LGA_JERE", "value": "7"},
+]
+
+
+@pytest.fixture
+def _no_dhis2_server(monkeypatch):
+    """An instance with no DHIS2_ENV configured — CI, and any fresh checkout."""
+    monkeypatch.setattr(dhis2.st, "secrets", {})
+
+
+def test_push_refuses_a_payload_with_unmapped_codes(_no_dhis2_server):
+    """DHIS2 rejects the whole set, not the offending value, so failing here is kinder.
+
+    Asserted with no server configured, because that is the state CI runs in and the state
+    every fresh checkout starts in — the check must not depend on having credentials.
+    """
+    result = dhis2.push_data_values(UNMAPPED_VALUE)
 
     assert result["status"] == "ERROR"
     assert "1 of 1" in result["message"]
 
 
-def test_push_refuses_an_empty_payload():
+def test_an_unsendable_payload_is_reported_before_missing_credentials(_no_dhis2_server):
+    """Ordering, pinned: whether a payload is submittable does not depend on credentials.
+
+    The auth check used to run first, so an unconfigured instance blamed the credentials for
+    a payload that was itself unsendable — the wrong problem — and the guard against
+    submitting garbage sat behind having somewhere to submit it to.
+    """
+    message = dhis2.push_data_values(UNMAPPED_VALUE)["message"]
+
+    assert "org unit or data element UID" in message
+    assert "DHIS2_ENV" not in message, "reported the missing server, not the broken payload"
+
+
+def test_push_reports_a_missing_server_when_the_payload_is_fine(_no_dhis2_server):
+    result = dhis2.push_data_values([
+        {"dataElement": "s46m5MS0hxu", "period": "20260728",
+         "orgUnit": "at6UHUQatSo", "value": "7"},
+    ])
+
+    assert result["status"] == "ERROR"
+    assert "DHIS2_ENV" in result["message"]
+
+
+def test_push_refuses_an_empty_payload(_no_dhis2_server):
     assert dhis2.push_data_values([])["status"] in {"ERROR", "WARNING"}
