@@ -382,6 +382,13 @@ def _build_subsample_children(
                     "resolution_level": "genus",
                     "pending_identification": True,
                 },
+                # Carried from the batch like the date, coordinates and LGA. Without it a
+                # child fell back to "ID 4f3a9c21…" while its own batch showed the
+                # collector's name — so vialing out 100 specimens filled the Collector
+                # column with 100 ids around a single name, for one person's work.
+                "collector_label": as_screening_dict(
+                    batch_row.get("field_screening_result")
+                ).get("collector_label"),
                 "timestamp": now_iso,
             },
             "pcr_status": "not_submitted",
@@ -1475,19 +1482,56 @@ def extract_genus_counts_from_screening(field_screening_result: dict | None) -> 
     return {}
 
 
+def batch_catch_summary(field_screening_result) -> dict | None:
+    """What a manual_field_log batch actually caught, and how much of it has been vialed out.
+
+    `extract_genus_counts_from_screening` reports a batch **net** of its vialed-out children,
+    so that batch + children conserve the catch. That is the right number for a total and the
+    wrong one for describing the collection event itself: a batch whose every specimen has
+    been vialed out nets to zero, and captioning its photo "0 specimen(s)" denies the 170
+    mosquitoes that were caught. This returns the raw catch alongside the tally, so a caller
+    can say what was collected *and* where it went.
+
+    Returns None for any row that is not a batch — an identification row has no catch of its
+    own, it is one specimen already counted against its parent.
+    """
+    screening = as_screening_dict(field_screening_result)
+    if screening.get("screening_method") != "manual_field_log":
+        return None
+
+    result = screening.get("result") or {}
+    by_genus = {g: int(result.get(key, 0) or 0) for g, key in _FIELD_LOG_GENUS_KEYS.items()}
+    by_genus["Other"] = int(result.get("other_genera_count", 0) or 0)
+    collected = sum(by_genus.values())
+    vialed = sum(int(v or 0) for v in (result.get("vialed_out") or {}).values())
+    return {
+        "collected": collected,
+        "by_genus": by_genus,
+        "vialed_out": vialed,
+        # Floored: a tally that somehow exceeds the raw count is a data fault, not a licence
+        # to report a negative catch.
+        "remaining": max(0, collected - vialed),
+    }
+
+
 # The sentinel sql/enforce_collector_id.sql backfills onto rows written before identity
 # was enforced. Their author was never recorded anywhere and cannot be recovered, so they
 # are labelled as what they are rather than attributed to a guess.
 UNATTRIBUTED_LEGACY = "unattributed-legacy"
 
 
-def extract_collector_display(row) -> str:
+def extract_collector_display(row, known_labels: dict | None = None) -> str:
     """The collector to show for one specimen_records row, for tables and exports.
 
     Prefers the human-readable collector_label stamped into field_screening_result at
     write time; a bare collector_id is a UUID, which tells a reader nothing. Falls back to
     a truncated id for rows written before the label existed, so the cell is never blank —
     an empty Collector column is exactly the ambiguity this whole change set removed.
+
+    `known_labels` is an optional {collector_id: label} map, normally built across the whole
+    table by add_collector_column. It lets a row that has no label of its own still show the
+    collector's name when a sibling row identifies the same id — the same person, established
+    from the data. Without it, one collector appears under two different labels in one table.
     """
     if not isinstance(row, dict):
         return "Unknown"
@@ -1496,14 +1540,9 @@ def extract_collector_display(row) -> str:
     if collector_id == UNATTRIBUTED_LEGACY:
         return "Unattributed (pre-identity record)"
 
-    screening = row.get("field_screening_result") or {}
-    if isinstance(screening, str):
-        try:
-            screening = json.loads(screening)
-        except Exception:
-            logger.debug("Could not JSON-decode field_screening_result for collector display", exc_info=True)
-            screening = {}
-    label = (screening.get("collector_label") or "").strip() if isinstance(screening, dict) else ""
+    label = (as_screening_dict(row.get("field_screening_result")).get("collector_label") or "").strip()
+    if not label and known_labels and collector_id:
+        label = (known_labels.get(collector_id) or "").strip()
 
     if label:
         return label
@@ -1513,12 +1552,40 @@ def extract_collector_display(row) -> str:
     return "Unknown"
 
 
+def collector_labels_by_id(rows) -> dict[str, str]:
+    """{collector_id: label} learned from whichever rows carry a label.
+
+    Not every row stores one — rows written before the label existed, and vialed children
+    created before they inherited it, hold only a UUID. But a collector_id that appears
+    with a name on one row is the same person on every other row, so the name is recoverable
+    from the data rather than guessed at.
+    """
+    labels: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        collector_id = str(row.get("collector_id") or "").strip()
+        if not collector_id or collector_id == UNATTRIBUTED_LEGACY or collector_id in labels:
+            continue
+        label = (as_screening_dict(row.get("field_screening_result")).get("collector_label") or "").strip()
+        if label:
+            labels[collector_id] = label
+    return labels
+
+
 def add_collector_column(df: pd.DataFrame, column: str = "Collector") -> pd.DataFrame:
-    """Return a copy of a specimen_records DataFrame with a human-readable collector column."""
+    """Return a copy of a specimen_records DataFrame with a human-readable collector column.
+
+    Labels are resolved across the whole frame first, so one collector reads as one name
+    rather than a name on some rows and "ID 4f3a9c21…" on the rest — which is what a table
+    showed once its batch had been vialed out, since only the batch carried the label.
+    """
     if df is None or df.empty:
         return df
     out = df.copy()
-    out[column] = [extract_collector_display(row) for row in out.to_dict("records")]
+    records = out.to_dict("records")
+    known = collector_labels_by_id(records)
+    out[column] = [extract_collector_display(row, known) for row in records]
     return out
 
 

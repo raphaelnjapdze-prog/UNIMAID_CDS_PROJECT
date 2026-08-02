@@ -18,6 +18,7 @@ from openpyxl.utils import get_column_letter
 from utils.data_manager import (
     add_collector_column,
     as_screening_dict,
+    batch_catch_summary,
     classify_resistance_status,
     compute_mortality_percentage,
     extract_genus_counts_from_screening,
@@ -75,10 +76,199 @@ def _flatten_specimen_df(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+GENUS_COLS = ["Anopheles", "Culex", "Aedes", "Other"]
+
+NO_LGA = "Not recorded"
+
+
+def _lga_series(df: pd.DataFrame) -> pd.Series:
+    """The lga column with every way of saying "nothing" collapsed into one label.
+
+    A missing LGA arrives as NULL from some write paths and as an empty string from others.
+    Left as they are, the blank counts as an LGA in "LGAs covered" and splits the per-LGA
+    table into a "Not recorded" row and a nameless one — two rows, one absence.
+    """
+    lga = df["lga"] if "lga" in df.columns else pd.Series(index=df.index, dtype="object")
+    return lga.astype("object").where(lga.notna(), NO_LGA).apply(
+        lambda v: str(v).strip() or NO_LGA
+    )
+
+
+def _totals(df: pd.DataFrame) -> dict:
+    """The headline numbers, counted as specimens rather than rows.
+
+    A row is not a mosquito: one manual_field_log row is a whole collection event holding
+    several hundred. Reporting row counts to a reader who is not going to ask which is which
+    is how "171 records" gets read as 171 mosquitoes.
+    """
+    present = [c for c in GENUS_COLS if c in df.columns]
+    counts = {c: int(df[c].sum()) for c in present}
+    total = sum(counts.values())
+    confirmed = int((df["pcr_status"] == "confirmed").sum()) if "pcr_status" in df.columns else 0
+    return {
+        "counts": counts,
+        "total": total,
+        "anopheles": counts.get("Anopheles", 0),
+        "anopheles_share": (counts.get("Anopheles", 0) / total * 100) if total else 0.0,
+        "confirmed": confirmed,
+        "records": len(df),
+        # Named LGAs only: "Not recorded" is the absence of one, and counting it inflated
+        # "LGAs covered" by one for any selection with a blank.
+        "lgas": sorted(v for v in _lga_series(df).unique() if v != NO_LGA),
+    }
+
+
+def _plain_summary(df: pd.DataFrame) -> str:
+    """One paragraph, in words, for a reader who will not read the table.
+
+    Every figure comes from the filtered data. Where there is nothing to say — no PCR
+    confirmations, no LGA recorded — it says so plainly instead of omitting the sentence and
+    leaving the impression the question was never asked.
+    """
+    t = _totals(df)
+    if not t["total"]:
+        return (
+            "No mosquitoes were counted in the records matching these filters. This can mean "
+            "no collections took place, or that the entries recorded no genus counts."
+        )
+
+    dates = df["collection_date"].dropna() if "collection_date" in df.columns else pd.Series(dtype="datetime64[ns]")
+    when = ""
+    if not dates.empty:
+        first, last = dates.min().date(), dates.max().date()
+        when = f" between {first:%d %B %Y} and {last:%d %B %Y}" if first != last else f" on {first:%d %B %Y}"
+
+    where = ""
+    if t["lgas"]:
+        named = ", ".join(t["lgas"][:3])
+        more = f" and {len(t['lgas']) - 3} other LGA(s)" if len(t["lgas"]) > 3 else ""
+        where = f" in {named}{more}"
+    else:
+        where = " (no LGA recorded on these entries)"
+
+    parts = [
+        f"**{t['total']:,} mosquitoes** were collected{when}{where}, "
+        f"across **{t['records']:,}** recorded entries."
+    ]
+    parts.append(
+        f"**{t['anopheles']:,} ({t['anopheles_share']:.0f}%)** were *Anopheles*, the genus that "
+        "transmits malaria — this is the figure that matters for malaria risk."
+    )
+    if t["confirmed"]:
+        parts.append(
+            f"**{t['confirmed']:,}** specimen(s) have been confirmed by PCR, the laboratory test "
+            "that identifies species which look identical under a microscope."
+        )
+    else:
+        parts.append(
+            "No specimens have been PCR-confirmed yet, so species-level identifications here "
+            "remain provisional."
+        )
+    return " ".join(parts)
+
+
+def _lga_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """Counts per LGA — a handful of meaningful rows, instead of the first 20 of hundreds."""
+    if "lga" not in df.columns:
+        return pd.DataFrame()
+    present = [c for c in GENUS_COLS if c in df.columns]
+    if not present:
+        return pd.DataFrame()
+    out = df.groupby(_lga_series(df))[present].sum().reset_index()
+    out.columns = ["LGA"] + present
+    out["Total"] = out[present].sum(axis=1)
+    return out.sort_values("Total", ascending=False).reset_index(drop=True)
+
+
+def _first_text(*values, default: str) -> str:
+    """The first value that is real, readable text — skipping None, NaN and blanks."""
+    for value in values:
+        if value is None or not pd.notna(value):
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return default
+
+
 def _first_photo_url(photo_urls) -> str | None:
     if isinstance(photo_urls, list) and len(photo_urls) > 0:
         return photo_urls[0]
     return None
+
+
+def _entries_with_photos(df: pd.DataFrame) -> pd.DataFrame:
+    """Just the entries carrying a photo, with the first one resolved into `_first_photo`.
+
+    The photo-evidence section shows one entry at a time, so an entry with no photo has
+    nothing to contribute there — it only padded the picker with rows that opened onto
+    "No photo for this entry". Every entry, photo or not, is still listed in the detailed
+    table above.
+
+    `_first_photo` is guaranteed to be a real non-empty URL string on every row returned:
+    under pandas 3 the applied column takes the new `str` dtype and a photo-less row's None
+    comes back out as float NaN — which is truthy, so a plain `if` passed it straight to
+    st.image() and the page died with "'float' object has no attribute 'format'".
+    """
+    if "photo_urls" not in df.columns:
+        return df.iloc[0:0].assign(_first_photo=pd.Series(dtype="object"))
+    out = df.copy()
+    out["_first_photo"] = [_first_photo_url(v) for v in out["photo_urls"]]
+    keep = out["_first_photo"].apply(lambda v: isinstance(v, str) and bool(v))
+    return out[keep]
+
+
+def _entry_label(row) -> str:
+    """The one-line summary identifying an entry in the photo-evidence picker.
+
+    The date is checked with isinstance(pd.Timestamp), not hasattr("date"):
+    _flatten_specimen_df coerces the column with errors="coerce", so a missing date arrives
+    as pd.NaT — which *has* a .date() returning NaT, and is truthy besides. An attribute
+    check and an `or` fallback both sailed past it and the row read "NaT · Jere · 4".
+    """
+    date = row.get("collection_date")
+    date_text = date.date() if isinstance(date, pd.Timestamp) else "date n/a"
+    # notna, not `or`: a None in an object column comes back as float NaN, which is truthy,
+    # so plain `a or b or "fallback"` selects the NaN and the header reads "· nan ·" —
+    # the same pandas trap as the NaT above and the photo URL below.
+    place = _first_text(row.get("lga"), row.get("breeding_site_type"), default="location n/a")
+    return f"{date_text} · {place} · {_catch_phrase(row)}"
+
+
+def _catch_phrase(row) -> str:
+    """How much this entry represents, said the way its own row means it.
+
+    A batch is described by what it *caught*, not by what is left on it. The flattened genus
+    columns hold the batch net of its vialed-out children — correct for totals, and actively
+    misleading here: a fully vialed batch nets to zero, so the photo of a collection event
+    that yielded 170 mosquitoes was captioned "0 specimen(s)". Where the catch has gone is
+    said out loud instead, since a reader comparing this to the totals above deserves to know
+    those 170 are counted as 170 individual rows and not lost.
+    """
+    batch = batch_catch_summary(row.get("field_screening_result"))
+    if batch is None:
+        caught = sum(int(row.get(g, 0) or 0) for g in GENUS_COLS)
+        return f"{caught:,} specimen" + ("" if caught == 1 else "s")
+
+    collected, vialed = batch["collected"], batch["vialed_out"]
+    if not vialed:
+        return f"{collected:,} collected"
+    if batch["remaining"]:
+        return f"{collected:,} collected ({vialed:,} vialed out)"
+    return f"{collected:,} collected (all vialed out)"
+
+
+def _genus_counts_text(row) -> str:
+    """Per-genus counts for one entry, saying the same thing its label says.
+
+    A batch is shown its raw catch for the same reason `_catch_phrase` reports one: the
+    flattened genus columns hold the batch net of its vialed-out children, so a fully vialed
+    batch labelled "170 collected" had its own detail pane read "Anopheles 0, Culex 0,
+    Aedes 0" two lines beneath — the entry contradicting itself.
+    """
+    batch = batch_catch_summary(row.get("field_screening_result"))
+    counts = batch["by_genus"] if batch else {g: int(row.get(g, 0) or 0) for g in GENUS_COLS}
+    return ", ".join(f"{g} {counts.get(g, 0):,}" for g in ("Anopheles", "Culex", "Aedes"))
 
 
 def _compile_specimen_excel(df: pd.DataFrame) -> io.BytesIO:
@@ -253,67 +443,90 @@ def render_reports_page():
             if processed.empty:
                 st.error("No records match the current filters.")
             else:
-                st.markdown(f"**{len(processed)}** record(s) matched.")
+                totals = _totals(processed)
+
+                # In words first. The tables below answer "which sites, which dates"; this
+                # answers "what happened", which is the only question most readers of this
+                # page have.
+                st.info(_plain_summary(processed))
 
                 kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-                kpi1.metric("Anopheles", int(processed.get("Anopheles", pd.Series(dtype=int)).sum()))
-                kpi2.metric("Culex", int(processed.get("Culex", pd.Series(dtype=int)).sum()))
-                kpi3.metric("Aedes", int(processed.get("Aedes", pd.Series(dtype=int)).sum()))
-                kpi4.metric(
-                    "PCR Confirmed",
-                    int((processed["pcr_status"] == "confirmed").sum()) if "pcr_status" in processed.columns else 0,
+                kpi1.metric(
+                    "Mosquitoes collected", f"{totals['total']:,}",
+                    help="Individual mosquitoes, not entries. One field log can hold hundreds.",
                 )
+                kpi2.metric(
+                    "Anopheles (malaria vector)", f"{totals['anopheles']:,}",
+                    delta=f"{totals['anopheles_share']:.0f}% of the catch", delta_color="off",
+                )
+                kpi3.metric(
+                    "PCR confirmed", f"{totals['confirmed']:,}",
+                    help="Specimens whose species was verified in the laboratory.",
+                )
+                kpi4.metric(
+                    "LGAs covered", f"{len(totals['lgas']):,}",
+                    help="Local Government Areas with at least one entry in this selection.",
+                )
+
+                # Per LGA, not the first 20 rows of hundreds. "Showing 20 of 171" invited the
+                # reading that 171 was a number of mosquitoes, and 20 arbitrary rows answer no
+                # question anyone has.
+                by_lga = _lga_summary(processed)
+                if not by_lga.empty:
+                    st.markdown("**Where they were collected**")
+                    st.dataframe(by_lga, width="stretch", hide_index=True)
 
                 shown = add_collector_column(processed)
                 display_cols = [c for c in [
                     "collection_date", "lga", "breeding_site_type", "screening_method", "Collector",
                     "Anopheles", "Culex", "Aedes", "Other", "pcr_status", "pcr_confirmed_species",
                 ] if c in shown.columns]
-                st.dataframe(shown[display_cols].head(20), width="stretch")
-                if len(processed) > 20:
-                    st.caption(f"Showing 20 of {len(processed)} — full set included in exports below.")
+                with st.expander(f"Every entry ({len(processed):,}) — the detailed table"):
+                    st.caption(
+                        "One row is one **entry**, not one mosquito: a field log row is a whole "
+                        "collection event holding its counts, while a vialed-out individual is "
+                        "a single specimen. The totals above already account for both."
+                    )
+                    st.dataframe(shown[display_cols], width="stretch", hide_index=True)
 
                 st.markdown("---")
                 st.subheader("Photo Evidence")
-                show_photos_only = st.checkbox("Show only entries with a photo", value=False)
 
-                photo_col = processed["photo_urls"].apply(_first_photo_url) if "photo_urls" in processed.columns else None
-                evidence_df = processed.copy()
-                if photo_col is not None:
-                    evidence_df["_first_photo"] = photo_col
-                    if show_photos_only:
-                        evidence_df = evidence_df[evidence_df["_first_photo"].notna()]
-                else:
-                    evidence_df["_first_photo"] = None
-
+                evidence_df = _entries_with_photos(processed)
                 if evidence_df.empty:
                     st.info("No entries with photos in the current filter.")
                 else:
-                    for _, row in evidence_df.head(10).iterrows():
-                        col_text, col_img = st.columns([2, 1])
-                        with col_text:
-                            st.markdown(f"**Specimen:** `{row.get('specimen_id', 'n/a')}`")
-                            st.write(f"Date: {row.get('collection_date', 'N/A')}")
-                            st.write(f"Site: {row.get('breeding_site_type', 'Not recorded')}")
-                            st.write(f"GPS: `{row.get('gps_lat', 'N/A')}, {row.get('gps_lon', 'N/A')}`")
-                            st.write(f"Genus counts — An: {row.get('Anopheles',0)} Cx: {row.get('Culex',0)} Ae: {row.get('Aedes',0)}")
-                            st.write(f"PCR status: {row.get('pcr_status', 'not_submitted')}")
-                        with col_img:
-                            # Must be a real URL string, not merely truthy. Under pandas 3
-                            # the applied column takes the new `str` dtype, and the None for
-                            # a photo-less row comes back out as float NaN — which is
-                            # truthy, so a plain `if` passed it straight to st.image() and
-                            # the page died with "'float' object has no attribute 'format'".
-                            photo = row.get("_first_photo")
-                            if isinstance(photo, str) and photo:
-                                st.image(photo, width="stretch")
-                            else:
-                                st.caption("No photo for this entry.")
-                            specimen_id = row.get("specimen_id")
-                            if specimen_id and specimen_id != "n/a":
-                                with st.expander("🏷️ Specimen label (QR)"):
-                                    render_specimen_qr(specimen_id, key=f"qr_report_{specimen_id}", width=150)
-                        st.markdown("<hr style='border-style:dashed; opacity:0.4;'>", unsafe_allow_html=True)
+                    # A picker over the entries that actually have a photo, rather than a
+                    # stack of expanders. Entries are looked at one at a time, so 25 of them
+                    # filled several screens of the command centre to show one photo — and
+                    # most were "No photo for this entry", which is not evidence. The
+                    # detailed table above is where every entry is listed.
+                    choice = st.selectbox(
+                        f"Entry to view ({len(evidence_df):,} with a photo)",
+                        options=range(len(evidence_df)),
+                        # Indices, not label strings: two entries from the same site on the
+                        # same day produce identical labels, and a selectbox keyed by value
+                        # cannot tell them apart.
+                        format_func=lambda i: _entry_label(evidence_df.iloc[i]),
+                    )
+                    row = evidence_df.iloc[choice]
+                    photo_url = row["_first_photo"]
+
+                    photo_col_, detail = st.columns([1, 1])
+                    with photo_col_:
+                        st.image(photo_url, width="stretch")
+                    with detail:
+                        st.write(f"**Site:** {_first_text(row.get('breeding_site_type'), default='Not recorded')}")
+                        st.write(f"**LGA:** {_first_text(row.get('lga'), default='Not recorded')}")
+                        st.write(f"**Counts** — {_genus_counts_text(row)}")
+                        st.write(f"**PCR:** {row.get('pcr_status', 'not_submitted')}")
+                        gps_lat, gps_lon = row.get("gps_lat"), row.get("gps_lon")
+                        if pd.notna(gps_lat) and pd.notna(gps_lon):
+                            st.caption(f"GPS {gps_lat}, {gps_lon}")
+                        specimen_id = row.get("specimen_id")
+                        if specimen_id and specimen_id != "n/a":
+                            st.caption(f"Specimen `{specimen_id}`")
+                            render_specimen_qr(specimen_id, key=f"qr_report_{specimen_id}", width=120)
 
                 st.markdown("---")
                 st.subheader("Export")

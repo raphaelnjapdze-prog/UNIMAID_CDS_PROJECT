@@ -5,12 +5,15 @@ specimens from a batch field-count log — the parts that keep genus totals hone
 (no double-counting) without needing a live Supabase backend.
 """
 
+import json
+
 import pandas as pd
 
 from utils.data_manager import (
     _apply_vialed_out,
     _available_to_vial,
     _build_subsample_children,
+    batch_catch_summary,
     extract_genus_counts_from_screening,
     extract_primary_genus,
     is_pending_identification,
@@ -101,6 +104,25 @@ class TestBuildSubsampleChildren:
         assert k["gps_lat"] == 11.8
         assert k["breeding_site_type"] == "pond"
 
+    def test_inherits_the_collector_label(self):
+        """The child is the same person's work as its batch. Without the label carried over
+        it falls back to a bare id, so one collector reads as a name on the batch row and a
+        UUID on every specimen vialed out of it."""
+        batch = self._batch()
+        batch["field_screening_result"] = {
+            "screening_method": "manual_field_log",
+            "collector_label": "A. Musa",
+            "result": {"anopheles_count": 500},
+        }
+
+        kids = _build_subsample_children(batch, "Anopheles", 2, None, "2026-07-12T00:00:00Z")
+
+        assert all(k["field_screening_result"]["collector_label"] == "A. Musa" for k in kids)
+
+    def test_no_collector_label_on_the_batch_is_not_invented(self):
+        kids = _build_subsample_children(self._batch(), "Anopheles", 1, None, "2026-07-12T00:00:00Z")
+        assert kids[0]["field_screening_result"]["collector_label"] is None
+
     def test_tube_labels_numbered_when_prefix_given(self):
         kids = _build_subsample_children(self._batch(), "Anopheles", 2, "LAB-001", "2026-07-12T00:00:00Z")
         assert kids[0]["tube_label"] == "LAB-001-001"
@@ -109,6 +131,45 @@ class TestBuildSubsampleChildren:
     def test_no_tube_label_without_prefix(self):
         kids = _build_subsample_children(self._batch(), "Anopheles", 1, None, "2026-07-12T00:00:00Z")
         assert kids[0]["tube_label"] is None
+
+
+class TestBatchCatchSummary:
+    """The batch's original catch — what extract_genus_counts_from_screening deliberately
+    does not report, because totals need the netted figure and descriptions need this one."""
+
+    def _log(self, vialed=None, **counts):
+        result = {f"{g}_count": n for g, n in counts.items()}
+        if vialed:
+            result["vialed_out"] = vialed
+        return {"screening_method": "manual_field_log", "result": result}
+
+    def test_reports_the_raw_catch_not_the_remainder(self):
+        summary = batch_catch_summary(self._log(anopheles=100, culex=70,
+                                                vialed={"Anopheles": 100, "Culex": 70}))
+        assert summary["collected"] == 170
+        assert summary["vialed_out"] == 170
+        assert summary["remaining"] == 0
+
+    def test_breaks_the_raw_catch_down_by_genus(self):
+        summary = batch_catch_summary(self._log(anopheles=100, culex=70,
+                                                vialed={"Anopheles": 100, "Culex": 70}))
+        assert summary["by_genus"] == {"Anopheles": 100, "Culex": 70, "Aedes": 0, "Other": 0}
+
+    def test_counts_other_genera_in_the_catch(self):
+        # "Other" is caught but cannot be vialed out, so it belongs in the total only.
+        assert batch_catch_summary(self._log(anopheles=5, other_genera=3))["collected"] == 8
+
+    def test_remaining_never_goes_negative(self):
+        summary = batch_catch_summary(self._log(anopheles=5, vialed={"Anopheles": 9}))
+        assert summary["remaining"] == 0
+
+    def test_an_identification_row_has_no_catch(self):
+        assert batch_catch_summary({"screening_method": "field_subsample",
+                                    "result": {"genus": "Anopheles"}}) is None
+
+    def test_decodes_a_json_string(self):
+        raw = json.dumps(self._log(anopheles=12))
+        assert batch_catch_summary(raw)["collected"] == 12
 
 
 class TestGenusCountsWithSubsampling:
