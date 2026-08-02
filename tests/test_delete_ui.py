@@ -182,3 +182,72 @@ class TestVialedIndividualsAreFlaggedBeforeConfirming:
         # A batch with 40 vialed-out individuals looks like one row in the table. The user
         # must be told what else goes before typing DELETE.
         assert any("40" in w.value for w in at.warning)
+
+
+class TestTheAdminBulkDeleteIsReachable:
+    """The project-wide delete lived inside the entry picker, which returns early — when
+    nothing is selected, and when there is nothing to select. So it only appeared after you
+    had ticked an entry in the list above it, and never at all for an admin with no entries
+    of their own. Caught by opening the page, not by any test, which is why these exist."""
+
+    def _as_admin(self, monkeypatch, *, passkey_set=True, owner="me"):
+        import components.site_log as site_log
+
+        monkeypatch.setattr(site_log, "is_current_user_admin", lambda: True)
+        monkeypatch.setattr(site_log, "get_current_user_id", lambda: "me")
+        monkeypatch.setattr(site_log, "admin_passkey_configured", lambda: passkey_set)
+        monkeypatch.setattr(site_log, "fetch_batch_children", lambda _b: pd.DataFrame())
+        monkeypatch.setattr(site_log, "delete_specimen_records", lambda *_a, **_k: None)
+        monkeypatch.setattr(site_log, "delete_all_specimen_records", lambda *_a, **_k: None)
+        row = _row("batch-1")
+        row["collector_id"] = owner
+        monkeypatch.setattr(site_log, "load_specimen_records", lambda: pd.DataFrame([row]))
+
+    def test_an_admin_sees_it_without_selecting_anything(self, monkeypatch):
+        self._as_admin(monkeypatch)
+
+        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
+        at.run()
+
+        assert any(t.key == "sitelog_admin_passkey" for t in at.text_input)
+
+    def test_an_admin_sees_it_when_every_entry_belongs_to_someone_else(self, monkeypatch):
+        """Clearing a project you did not personally log is the whole point of the control,
+        so it must not depend on the admin having entries of their own in the picker."""
+        self._as_admin(monkeypatch, owner="another-investigator")
+
+        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
+        at.run()
+
+        assert any(t.key == "sitelog_admin_passkey" for t in at.text_input)
+
+    def test_a_non_admin_never_sees_it(self, site_log):
+        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
+        at.run()
+
+        assert not any(t.key == "sitelog_admin_passkey" for t in at.text_input)
+        assert not any(b.key == "sitelog_admin_go" for b in at.button)
+
+    def test_no_passkey_configured_disables_it_rather_than_prompting(self, monkeypatch):
+        """A prompt that cannot succeed no matter what is typed is worse than saying so."""
+        self._as_admin(monkeypatch, passkey_set=False)
+
+        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
+        at.run()
+
+        assert not any(t.key == "sitelog_admin_passkey" for t in at.text_input)
+        assert any("passkey is configured" in i.value for i in at.info)
+
+    def test_the_button_stays_disabled_until_both_gates_are_filled(self, monkeypatch):
+        self._as_admin(monkeypatch)
+
+        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
+        at.run()
+
+        assert at.button(key="sitelog_admin_go").disabled, "armed with neither field filled"
+
+        at.text_input(key="sitelog_admin_passkey").set_value("something").run()
+        assert at.button(key="sitelog_admin_go").disabled, "armed on the passkey alone"
+
+        at.text_input(key="sitelog_admin_confirm").set_value("DELETE EVERYTHING").run()
+        assert not at.button(key="sitelog_admin_go").disabled

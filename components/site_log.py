@@ -466,77 +466,88 @@ def _render_delete_entries(log_df: pd.DataFrame) -> None:
     cannot outlive the collection event they came from), and each entry's photos are
     removed from storage. Deleting the row alone was what left dead photo URLs and
     orphaned objects behind.
+
+    The admin section is rendered from here rather than from inside the picker, because the
+    picker returns early — when nothing is selected, and when there is nothing to select.
+    Called from in there, the project-wide delete only appeared once you had ticked an entry
+    in the list above it, and never at all for an admin with no entries of their own.
     """
+    is_admin = is_current_user_admin()
+
     with st.expander("🗑️ Delete entries (irreversible)"):
-        st.caption(
-            "Removes the collection event, every individual specimen vialed out of it, "
-            "and its uploaded photos. Use this to clear a trial run before a fresh one — "
-            "there is no undo, and real field data deleted here is gone."
-        )
-
-        # Only your own entries, unless you are a registered admin. The database refuses
-        # the rest either way (sql/add_ownership_delete_policies.sql); leaving them in the
-        # picker would just mean offering a checkbox that cannot do anything.
-        rows = log_df.to_dict("records")
-        is_admin = is_current_user_admin()
-        if not is_admin:
-            user_id = get_current_user_id()
-            mine = [row for row in rows if owns_row(row, user_id)]
-            hidden = len(rows) - len(mine)
-            rows = mine
-            if hidden:
-                st.caption(
-                    f"{hidden} entr{'y' if hidden == 1 else 'ies'} recorded by other "
-                    "investigators are not shown — you can only delete your own."
-                )
-
-        labels = {_entry_label(row): row["specimen_id"] for row in rows if row.get("specimen_id")}
-        if not labels:
-            st.info("No entries of yours are available to delete.")
-            return
-
-        chosen = st.multiselect(
-            "Entries to delete",
-            list(labels.keys()),
-            key="sitelog_delete_pick",
-            help="Pick one or more collection events.",
-        )
-        if not chosen:
-            return
-
-        # Name the collateral before asking for confirmation. A batch with 40 vialed-out
-        # individuals looks like one row here, and the user should know that before typing.
-        child_total = 0
-        for label in chosen:
-            children = fetch_batch_children(labels[label])
-            child_total += 0 if children.empty else len(children)
-        if child_total:
-            st.warning(
-                f"These {len(chosen)} entr{'y' if len(chosen) == 1 else 'ies'} have "
-                f"**{child_total} vialed-out individual specimen(s)** linked to them. "
-                "Those will be deleted too — an individual cannot outlive its batch."
-            )
-
-        typed = st.text_input(
-            f"Type DELETE to remove {len(chosen)} entr{'y' if len(chosen) == 1 else 'ies'}",
-            key="sitelog_delete_confirm",
-            placeholder="DELETE",
-        )
-        if st.button(
-            "Delete permanently", type="primary", key="sitelog_delete_go",
-            disabled=typed.strip().upper() != "DELETE",
-        ):
-            with st.spinner("Deleting entries, linked specimens and photos…"):
-                summary = delete_specimen_records([labels[label] for label in chosen])
-            # delete_specimen_records surfaces its own error on failure; never toast a
-            # deletion that did not happen.
-            if summary:
-                st.session_state["sitelog_delete_summary"] = summary
-                st.session_state.pop("sitelog_delete_pick", None)
-                st.rerun()
+        _render_own_entry_picker(log_df, is_admin)
 
     if is_admin:
         _render_admin_bulk_delete()
+
+
+def _render_own_entry_picker(log_df: pd.DataFrame, is_admin: bool) -> None:
+    """The pick-and-confirm delete for individual collection events."""
+    st.caption(
+        "Removes the collection event, every individual specimen vialed out of it, "
+        "and its uploaded photos. Use this to clear a trial run before a fresh one — "
+        "there is no undo, and real field data deleted here is gone."
+    )
+
+    # Only your own entries, unless you are a registered admin. The database refuses
+    # the rest either way (sql/add_ownership_delete_policies.sql); leaving them in the
+    # picker would just mean offering a checkbox that cannot do anything.
+    rows = log_df.to_dict("records")
+    if not is_admin:
+        user_id = get_current_user_id()
+        mine = [row for row in rows if owns_row(row, user_id)]
+        hidden = len(rows) - len(mine)
+        rows = mine
+        if hidden:
+            st.caption(
+                f"{hidden} entr{'y' if hidden == 1 else 'ies'} recorded by other "
+                "investigators are not shown — you can only delete your own."
+            )
+
+    labels = {_entry_label(row): row["specimen_id"] for row in rows if row.get("specimen_id")}
+    if not labels:
+        st.info("No entries of yours are available to delete.")
+        return
+
+    chosen = st.multiselect(
+        "Entries to delete",
+        list(labels.keys()),
+        key="sitelog_delete_pick",
+        help="Pick one or more collection events.",
+    )
+    if not chosen:
+        return
+
+    # Name the collateral before asking for confirmation. A batch with 40 vialed-out
+    # individuals looks like one row here, and the user should know that before typing.
+    child_total = 0
+    for label in chosen:
+        children = fetch_batch_children(labels[label])
+        child_total += 0 if children.empty else len(children)
+    if child_total:
+        st.warning(
+            f"These {len(chosen)} entr{'y' if len(chosen) == 1 else 'ies'} have "
+            f"**{child_total} vialed-out individual specimen(s)** linked to them. "
+            "Those will be deleted too — an individual cannot outlive its batch."
+        )
+
+    typed = st.text_input(
+        f"Type DELETE to remove {len(chosen)} entr{'y' if len(chosen) == 1 else 'ies'}",
+        key="sitelog_delete_confirm",
+        placeholder="DELETE",
+    )
+    if st.button(
+        "Delete permanently", type="primary", key="sitelog_delete_go",
+        disabled=typed.strip().upper() != "DELETE",
+    ):
+        with st.spinner("Deleting entries, linked specimens and photos…"):
+            summary = delete_specimen_records([labels[label] for label in chosen])
+        # delete_specimen_records surfaces its own error on failure; never toast a
+        # deletion that did not happen.
+        if summary:
+            st.session_state["sitelog_delete_summary"] = summary
+            st.session_state.pop("sitelog_delete_pick", None)
+            st.rerun()
 
 
 def _render_admin_bulk_delete() -> None:
