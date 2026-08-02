@@ -95,8 +95,8 @@ It brings the full surveillance loop into one place:
 
 ```bash
 # 1. Clone
-git clone https://github.com/raphaelnjapdze-prog/UNIMAID_CDS_PROJECT.git
-cd UNIMAID_CDS_PROJECT
+git clone https://github.com/raphaelnjapdze-prog/VECTOR_SENTINEL_PROJECT.git
+cd VECTOR_SENTINEL_PROJECT
 
 # 2. Install the core runtime
 pip install -r requirements.txt
