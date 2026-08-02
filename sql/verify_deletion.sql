@@ -1,50 +1,81 @@
--- Verify that deletion actually works — run in the Supabase SQL Editor.
+-- Verify that deletion works, and that it is BOUNDED — run in the Supabase SQL Editor.
 --
--- Nothing here changes your data. Sections 2 and 3 are read-only; section 4 runs inside
--- `begin … rollback`, so the rows it creates and deletes never persist. Run the whole file
--- at once and read the PASS/FAIL column of each result.
+-- Select the whole file and Run. It ends with a single SELECT that returns every check as
+-- one table of PASS/FAIL rows.
+--
+-- READ THIS BEFORE EDITING THE FILE
+-- The SQL Editor displays the result of the LAST statement only. An earlier version of
+-- this file was ~20 separate statements each returning its own PASS/FAIL row; every one of
+-- them was computed and thrown away, and the editor reported "Success. No rows returned" —
+-- which reads like a pass and means nothing at all. So every check now writes into
+-- _verify_results and the file ends with one SELECT of that table. If you add a check, add
+-- it the same way; do not end the file with anything else.
 --
 -- WHY THIS FILE EXISTS
 -- The failure it checks for is silent. Under row-level security a DELETE (or UPDATE) with
 -- no matching policy does not raise — it matches zero rows and reports success. That is how
--- the app could appear to clear a trial run while every row stayed in the table. The app
--- now verifies the rows the database returns rather than trusting the call, but it still
--- needs the policies to exist. This file confirms they do, as the role the app actually
--- uses, without needing to sign into the app.
+-- the app could appear to clear a trial run while every row stayed in the table.
+--
+-- Sections 1-3 are read-only. Section 4 proves deletion WORKS. Section 5 proves it is
+-- BOUNDED, which is the opposite property: a blanket `using (true)` policy passes all of
+-- section 4 while letting any signed-in account wipe a colleague's field season.
+--
+-- IS IT SAFE?
+-- Sections 4 and 5 create rows, delete them, and then explicitly delete anything left over,
+-- all inside one transaction. If any statement raises, the whole transaction rolls back and
+-- nothing persists. On success the cleanup has already removed everything, and the last two
+-- checks in the output assert exactly that. Every row it creates is a fixed, recognisable
+-- id, so if you ever interrupt it mid-run you can find them:
+--   specimen_id like 'aaaaaaaa-0000-4000-8000-%' or 'bbbbbbbb-0000-4000-8000-%'
+--   batch_reference / facility_name = 'DELETE-SMOKE-TEST'
+--   app_admins.user_id = '33333333-3333-4333-8333-333333333333'
 --
 -- RUN THE MIGRATIONS FIRST, in this order:
 --   1. sql/add_update_policies.sql
 --   2. sql/add_delete_policies.sql
 --   3. sql/add_ownership_delete_policies.sql
---   4. sql/create_bioassay_results.sql      (optional — see section 1 before its
---   5. sql/create_clinical_case_data.sql     CHECK-constraint sections)
+--   4. sql/create_bioassay_results.sql      (optional — see the pre-flight rows before
+--   5. sql/create_clinical_case_data.sql     running their CHECK-constraint sections)
 --
 -- SIMULATING A SIGNED-IN USER
--- `set local role authenticated` alone is not enough once deletion is ownership-scoped:
--- the policy compares collector_id against auth.uid(), and auth.uid() reads the request's
--- JWT claims, which the SQL Editor does not set — so it comes back NULL and every row
--- looks like somebody else's. Sections 4 and 6 therefore also
--- `set local request.jwt.claims`, which is where auth.uid() looks. That makes it possible
--- to act as a specific user here, and to act as a *second* user, which is the only way to
--- prove one investigator cannot delete another's data.
+-- `set local role authenticated` alone is not enough once deletion is ownership-scoped: the
+-- policy compares the owner column against auth.uid(), and auth.uid() reads the request's
+-- JWT claims, which the SQL Editor does not set — so it comes back NULL, every row looks
+-- like somebody else's, and correct policies report FAIL. Sections 4 and 5 therefore also
+-- `set local request.jwt.claims`, which is where auth.uid() looks. That is also what makes
+-- it possible to act as a *second* user, which is the only way to prove one investigator
+-- cannot delete another's data.
 --
--- Three fixed test identities are used, and nothing outside these ever exists:
+-- Three fixed test identities, and nothing outside these ever exists:
 --   11111111-…  investigator A
 --   22222222-…  investigator B
---   33333333-…  an administrator
+--   33333333-…  an administrator (registered, then removed again)
+
+-- =====================================================================================
+-- The results table. Created outside the transaction so it survives to be selected.
+-- =====================================================================================
+drop table if exists _verify_results;
+create temp table _verify_results (
+  seq        int,
+  section    text,
+  check_name text,
+  detail     text,
+  verdict    text
+);
+
+begin;
 
 -- =====================================================================================
 -- 1. PRE-FLIGHT: would the CHECK constraints in the two schema files fail?
 -- =====================================================================================
--- Adding a CHECK to a table with a violating row fails outright. These must both read 0
--- before you run section 4 of create_bioassay_results.sql / create_clinical_case_data.sql.
--- A violation is bad data, not a constraint to relax: more dead mosquitoes than were
--- exposed, or fewer suspected cases than confirmed, is a measurement error.
-select
-  'bioassay_results' as table_name,
-  count(*) as violating_rows,
-  case when count(*) = 0 then 'SAFE to add constraints'
-       else 'FIX THESE ROWS FIRST' end as verdict
+-- Adding a CHECK to a table with a violating row fails outright. Both must read 0 before
+-- you run the CHECK-constraint sections of create_bioassay_results.sql /
+-- create_clinical_case_data.sql. A violation is bad data, not a constraint to relax: more
+-- dead mosquitoes than were exposed, or fewer suspected cases than confirmed, is a
+-- measurement error.
+insert into _verify_results
+select 10, '1. pre-flight', 'bioassay_results rows violating the CHECKs', count(*)::text,
+       case when count(*) = 0 then 'SAFE to add constraints' else 'FIX THESE ROWS FIRST' end
 from public.bioassay_results
 where mosquitoes_exposed is null or mosquitoes_exposed <= 0
    or mortality_24hr is null or mortality_24hr < 0
@@ -52,146 +83,121 @@ where mosquitoes_exposed is null or mosquitoes_exposed <= 0
    or (knockdown_60min is not null
        and (knockdown_60min < 0 or knockdown_60min > mosquitoes_exposed))
    or replicate_number is null or replicate_number <= 0
-   or concentration_pct is null or concentration_pct < 0
-union all
-select
-  'clinical_case_data',
-  count(*),
-  case when count(*) = 0 then 'SAFE to add constraints'
-       else 'FIX THESE ROWS FIRST' end
+   or concentration_pct is null or concentration_pct < 0;
+
+insert into _verify_results
+select 11, '1. pre-flight', 'clinical_case_data rows violating the CHECKs', count(*)::text,
+       case when count(*) = 0 then 'SAFE to add constraints' else 'FIX THESE ROWS FIRST' end
 from public.clinical_case_data
 where confirmed_cases is null or confirmed_cases < 0
    or (suspected_cases is not null and suspected_cases < confirmed_cases)
    or facility_name is null or btrim(facility_name) = '';
 
 -- =====================================================================================
--- 2. Which policies exist?
+-- 2. Do the policies exist, and are they ownership-scoped?
 -- =====================================================================================
--- Expected after the migrations:
---   specimen_records    INSERT, SELECT, UPDATE, DELETE
---   bioassay_results    INSERT, SELECT, DELETE          (no UPDATE, by design)
---   clinical_case_data  INSERT, SELECT, DELETE          (no UPDATE, by design)
---   storage.objects     a DELETE policy for the specimen-photos bucket
-select schemaname, tablename, cmd as command, policyname, roles
-from pg_policies
-where (schemaname = 'public'
-        and tablename in ('specimen_records', 'bioassay_results', 'clinical_case_data'))
-   or (schemaname = 'storage' and tablename = 'objects'
-       and coalesce(qual, '') || coalesce(with_check, '') ilike '%specimen-photos%')
-order by schemaname, tablename, cmd, policyname;
-
--- The one check that matters most, as a single verdict per table.
 -- cmd = 'ALL' counts: a `for all` policy covers DELETE too, and a hand-created policy is
 -- quite likely to be one. Treating only cmd = 'DELETE' as a pass would report a working
 -- setup as broken.
-select
-  t.tablename,
-  bool_or(p.cmd in ('DELETE', 'ALL')) as has_delete_policy,
-  case when bool_or(p.cmd in ('DELETE', 'ALL')) then 'PASS'
-       else 'FAIL — deletion will silently do nothing; run sql/add_delete_policies.sql' end
-    as verdict
-from (values ('specimen_records'), ('bioassay_results'), ('clinical_case_data')) as t(tablename)
-left join pg_policies p
-       on p.schemaname = 'public' and p.tablename = t.tablename
-group by t.tablename
-order by t.tablename;
+insert into _verify_results
+select 20, '2. policies', 'DELETE policy exists: ' || t.tablename,
+       coalesce(bool_or(p.cmd in ('DELETE','ALL')), false)::text,
+       case when bool_or(p.cmd in ('DELETE','ALL')) then 'PASS'
+            else 'FAIL - deletion will silently do nothing; run add_delete_policies.sql' end
+from (values ('specimen_records'),('bioassay_results'),('clinical_case_data')) as t(tablename)
+left join pg_policies p on p.schemaname = 'public' and p.tablename = t.tablename
+group by t.tablename;
 
--- Is the DELETE policy actually ownership-scoped, or still the blanket `true`?
--- A policy of `using (true)` deletes just fine — it passes every check above — while
--- letting any signed-in account remove anybody's field data. This is the check that tells
--- those two apart, and it reads the policy's qualifier rather than trusting its name.
-select
-  t.tablename,
-  coalesce(bool_or(p.qual ilike '%auth.uid()%'), false) as scoped_to_owner,
-  coalesce(bool_or(p.qual ilike '%is_app_admin%'), false) as has_admin_exemption,
-  case
-    when bool_or(p.qual ilike '%auth.uid()%') then 'PASS'
-    when count(p.*) > 0 then
-      'FAIL — DELETE policy is not ownership-scoped (still `true`?); '
-      || 'run sql/add_ownership_delete_policies.sql'
-    else 'FAIL — no DELETE policy at all; run sql/add_delete_policies.sql first'
-  end as verdict
-from (values ('specimen_records'), ('bioassay_results'), ('clinical_case_data')) as t(tablename)
-left join pg_policies p
-       on p.schemaname = 'public' and p.tablename = t.tablename
-      and p.cmd in ('DELETE', 'ALL')
-group by t.tablename
-order by t.tablename;
+-- The check that separates "deletion works" from "deletion is bounded". A policy of
+-- `using (true)` passes everything else in this file while leaving the door wide open.
+insert into _verify_results
+select 21, '2. policies', 'DELETE policy is ownership-scoped: ' || t.tablename,
+       coalesce(bool_or(p.qual ilike '%auth.uid()%'), false)::text,
+       case when bool_or(p.qual ilike '%auth.uid()%') then 'PASS'
+            when count(p.*) > 0 then 'FAIL - still `using (true)`; run add_ownership_delete_policies.sql'
+            else 'FAIL - no DELETE policy at all' end
+from (values ('specimen_records'),('bioassay_results'),('clinical_case_data')) as t(tablename)
+left join pg_policies p on p.schemaname = 'public' and p.tablename = t.tablename
+                       and p.cmd in ('DELETE','ALL')
+group by t.tablename;
 
--- The admin roster and its membership test have to exist, or the admin half of every
--- policy above silently never matches.
-select
-  'public.app_admins table' as object_name,
-  (to_regclass('public.app_admins') is not null) as present,
-  case when to_regclass('public.app_admins') is not null then 'PASS'
-       else 'FAIL — run sql/add_ownership_delete_policies.sql' end as verdict
-union all
-select
-  'public.is_app_admin() function',
-  exists (select 1 from pg_proc where proname = 'is_app_admin'
-                                  and pronamespace = 'public'::regnamespace),
-  case when exists (select 1 from pg_proc where proname = 'is_app_admin'
-                                            and pronamespace = 'public'::regnamespace)
-       then 'PASS' else 'FAIL — run sql/add_ownership_delete_policies.sql' end;
+insert into _verify_results
+select 22, '2. policies', 'admin exemption present: ' || t.tablename,
+       coalesce(bool_or(p.qual ilike '%is_app_admin%'), false)::text,
+       case when bool_or(p.qual ilike '%is_app_admin%') then 'PASS'
+            else 'FAIL - admins cannot delete other investigators rows' end
+from (values ('specimen_records'),('bioassay_results'),('clinical_case_data')) as t(tablename)
+left join pg_policies p on p.schemaname = 'public' and p.tablename = t.tablename
+                       and p.cmd in ('DELETE','ALL')
+group by t.tablename;
 
--- app_admins must have NO write policy. If one exists, a signed-in account could add
--- itself to the roster and then delete the entire project.
-select
-  count(*) as write_policies_on_app_admins,
-  case when count(*) = 0 then 'PASS'
-       else 'FAIL — a write policy on app_admins lets a session promote itself to admin' end
-    as verdict
+insert into _verify_results
+select 23, '2. policies', 'app_admins table exists',
+       (to_regclass('public.app_admins') is not null)::text,
+       case when to_regclass('public.app_admins') is not null then 'PASS'
+            else 'FAIL - run add_ownership_delete_policies.sql' end;
+
+insert into _verify_results
+select 24, '2. policies', 'is_app_admin() function exists',
+       exists(select 1 from pg_proc where proname = 'is_app_admin'
+                                      and pronamespace = 'public'::regnamespace)::text,
+       case when exists(select 1 from pg_proc where proname = 'is_app_admin'
+                                                and pronamespace = 'public'::regnamespace)
+            then 'PASS' else 'FAIL - run add_ownership_delete_policies.sql' end;
+
+-- If a write policy exists here, a signed-in account can add itself to the roster and then
+-- delete the entire project. The absence of one is load-bearing.
+insert into _verify_results
+select 25, '2. policies', 'app_admins has NO write policy', count(*)::text,
+       case when count(*) = 0 then 'PASS'
+            else 'FAIL - a session could promote itself to admin' end
 from pg_policies
 where schemaname = 'public' and tablename = 'app_admins'
-  and cmd in ('INSERT', 'UPDATE', 'DELETE', 'ALL');
+  and cmd in ('INSERT','UPDATE','DELETE','ALL');
+
+insert into _verify_results
+select 26, '2. policies', 'administrators registered', count(*)::text,
+       case when count(*) > 0 then 'PASS'
+            else 'FAIL - nobody is an admin; insert your uid into app_admins' end
+from public.app_admins;
 
 -- Photo objects are a separate policy surface from table rows — this is the one that was
--- missing, which is why deleting photos and deleting rows behaved differently.
---
--- Note this one is NOT ownership-scoped, by design and not by oversight: objects live at
--- '{specimen_id}/{uuid}.ext' with no owner in the path, and the app deletes a row before
--- its photos, so a policy joining back to specimen_records would find the row already gone
--- and refuse every legitimate delete. See docs/DELETING_ENTRIES.md, "A known gap".
-select
-  case when count(*) > 0 then 'PASS'
-       else 'FAIL — specimen photos cannot be deleted; run sql/add_delete_policies.sql' end
-    as storage_delete_verdict
+-- missing originally, which is why deleting photos and deleting rows behaved differently.
+insert into _verify_results
+select 27, '2. policies', 'storage DELETE policy for specimen-photos', count(*)::text,
+       case when count(*) > 0 then 'PASS'
+            else 'FAIL - specimen photos cannot be deleted; run add_delete_policies.sql' end
 from pg_policies
 where schemaname = 'storage' and tablename = 'objects'
-  and cmd in ('DELETE', 'ALL')
-  and coalesce(qual, '') || coalesce(with_check, '') ilike '%specimen-photos%';
+  and cmd in ('DELETE','ALL')
+  and coalesce(qual,'') || coalesce(with_check,'') ilike '%specimen-photos%';
+
+-- Deliberately NOT ownership-scoped, and recorded here so its absence is never mistaken for
+-- an oversight: objects live at '{specimen_id}/{uuid}.ext' with no owner in the path, and
+-- the app deletes a row before its photos, so a policy joining back to specimen_records
+-- would find the row already gone and refuse every legitimate delete. See
+-- docs/DELETING_ENTRIES.md, "A known gap".
+insert into _verify_results
+select 28, '2. policies', 'storage photos are ownership-scoped', 'false',
+       'KNOWN GAP - by design, see docs/DELETING_ENTRIES.md';
 
 -- =====================================================================================
 -- 3. Is RLS even switched on?
 -- =====================================================================================
 -- A table with policies but RLS disabled is wide open; a table with RLS on and no policies
--- is a black hole that swallows writes. Both should read `true` with policies present.
-select relname as table_name, relrowsecurity as rls_enabled, relforcerowsecurity as rls_forced
+-- is a black hole that swallows writes.
+insert into _verify_results
+select 30, '3. rls', 'RLS enabled: ' || relname, relrowsecurity::text,
+       case when relrowsecurity then 'PASS' else 'FAIL - policies are not being enforced' end
 from pg_class
 where relnamespace = 'public'::regnamespace
-  and relname in ('specimen_records', 'bioassay_results', 'clinical_case_data')
-order by relname;
+  and relname in ('specimen_records','bioassay_results','clinical_case_data');
 
 -- =====================================================================================
--- 4. END-TO-END: delete as the app's role, then roll it all back
+-- 4. END-TO-END: deletion works, as the role the app actually uses
 -- =====================================================================================
--- The SQL Editor runs as `postgres`, which owns these tables — and RLS does not apply to a
--- table's owner. Testing here as-is would pass no matter what the policies say. `set local
--- role authenticated` switches to the role the app's logged-in users actually get, so the
--- policies are genuinely exercised.
---
--- Everything is rolled back at the end. If you interrupt this section part-way, run
--- `rollback;` before doing anything else — the test rows are tagged 'delete-smoke-test'
--- and 'DELETE-SMOKE-TEST' if you ever need to find them.
-begin;
-
-set local role authenticated;
--- Act as investigator A. Without this auth.uid() is NULL, the rows below match no owner,
--- and every delete here would report FAIL against a perfectly correct policy.
-set local request.jwt.claims = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
-
--- A batch with two individuals vialed out of it, matching the shape the app writes.
--- collector_id is A's uid, because that is what the app stamps and what ownership means.
+-- The SQL Editor runs as `postgres`, which owns these tables, and RLS does not apply to a
+-- table's owner. Testing as-is would pass no matter what the policies say.
 insert into public.specimen_records
   (specimen_id, collection_date, collector_id, breeding_site_type,
    field_screening_result, specimen_role)
@@ -200,8 +206,7 @@ values
    '11111111-1111-4111-8111-111111111111', 'Stagnant pool',
    '{"screening_method":"manual_field_log",
      "result":{"anopheles_count":10,"culex_count":0,"aedes_count":0,
-               "vialed_out":{"Anopheles":2}}}'::jsonb,
-   'primary');
+               "vialed_out":{"Anopheles":2}}}'::jsonb, 'primary');
 
 insert into public.specimen_records
   (specimen_id, parent_specimen_id, collection_date, collector_id,
@@ -214,99 +219,78 @@ values
    current_date, '11111111-1111-4111-8111-111111111111',
    '{"screening_method":"field_subsample","result":{"genus":"Anopheles"}}'::jsonb, 'individual');
 
--- 4a. UPDATE — the app decrements a batch's vialed_out tally through this. Without it,
--- deleting one vialed individual leaves that collection event short by a mosquito.
-with updated as (
-  update public.specimen_records
-     set field_screening_result =
-         jsonb_set(field_screening_result, '{result,vialed_out,Anopheles}', '1'::jsonb)
-   where specimen_id = 'aaaaaaaa-0000-4000-8000-000000000001'
-  returning specimen_id
-)
-select 'specimen_records UPDATE (batch tally restore)' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 1 then 'PASS'
-            else 'FAIL — no UPDATE policy; run sql/add_update_policies.sql' end as verdict
-from updated;
-
--- 4b. DELETE one child — the per-entry delete path.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id = 'aaaaaaaa-0000-4000-8000-000000000002'
-  returning specimen_id
-)
-select 'specimen_records DELETE (one vialed individual)' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 1 then 'PASS'
-            else 'FAIL — no DELETE policy; run sql/add_delete_policies.sql' end as verdict
-from removed;
-
--- 4c. DELETE the batch and its remaining child — the cascade the app performs itself,
--- because parent_specimen_id is `on delete set null` and would otherwise orphan children
--- rather than remove them.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id in ('aaaaaaaa-0000-4000-8000-000000000001',
-                         'aaaaaaaa-0000-4000-8000-000000000003')
-  returning specimen_id
-)
-select 'specimen_records DELETE (batch + child cascade)' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 2 then 'PASS'
-            else 'FAIL — expected 2 rows removed' end as verdict
-from removed;
-
--- 4d/4e. The two side tables. Deleted by a marker column rather than by primary key, so
--- this works whichever key column the live table actually has.
 insert into public.bioassay_results
   (assay_date, treatment_name, concentration_pct, replicate_number, is_control,
    mosquitoes_exposed, exposure_time_minutes, mortality_24hr, submitted_by, batch_reference)
 values (current_date, 'Deltamethrin', 0.05, 1, false, 20, 60.0, 18,
         '11111111-1111-4111-8111-111111111111', 'DELETE-SMOKE-TEST');
 
-with removed as (
-  delete from public.bioassay_results
-   where batch_reference = 'DELETE-SMOKE-TEST'
-  returning 1
-)
-select 'bioassay_results DELETE' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 1 then 'PASS'
-            else 'FAIL — no DELETE policy; run sql/add_delete_policies.sql' end as verdict
-from removed;
-
 insert into public.clinical_case_data
   (report_date, facility_name, confirmed_cases, submitted_by)
 values (current_date, 'DELETE-SMOKE-TEST', 1, '11111111-1111-4111-8111-111111111111');
 
-with removed as (
-  delete from public.clinical_case_data
-   where facility_name = 'DELETE-SMOKE-TEST'
-  returning 1
-)
-select 'clinical_case_data DELETE' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 1 then 'PASS'
-            else 'FAIL — no DELETE policy; run sql/add_delete_policies.sql' end as verdict
-from removed;
+-- Act as investigator A, who owns everything just inserted.
+set local role authenticated;
+set local request.jwt.claims = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
 
--- Nothing above is kept. Every insert and delete in section 4 is undone here.
-rollback;
+-- 4a. UPDATE — the app decrements a batch's vialed_out tally through this. Without it,
+-- deleting one vialed individual leaves that collection event short by a mosquito.
+update public.specimen_records
+   set field_screening_result =
+       jsonb_set(field_screening_result, '{result,vialed_out,Anopheles}', '1'::jsonb)
+ where specimen_id = 'aaaaaaaa-0000-4000-8000-000000000001';
+
+-- Recorded here, before the deletes below remove the row it reads. `authenticated` has no
+-- rights on a temp table owned by postgres, so the role goes back and forth around each
+-- group of assertions rather than writing results from inside the switched role.
+reset role;
+
+insert into _verify_results
+select 40, '4. deletion works', 'batch tally UPDATE applied',
+       coalesce(field_screening_result #>> '{result,vialed_out,Anopheles}', 'null'),
+       case when field_screening_result #>> '{result,vialed_out,Anopheles}' = '1' then 'PASS'
+            else 'FAIL - no UPDATE policy; run add_update_policies.sql' end
+from public.specimen_records where specimen_id = 'aaaaaaaa-0000-4000-8000-000000000001';
+
+-- 4b/4c. The per-entry delete, then the batch + remaining child cascade the app performs
+-- itself (parent_specimen_id is `on delete set null`, so children would otherwise be
+-- orphaned rather than removed).
+set local role authenticated;
+
+delete from public.specimen_records where specimen_id = 'aaaaaaaa-0000-4000-8000-000000000002';
+delete from public.specimen_records
+ where specimen_id in ('aaaaaaaa-0000-4000-8000-000000000001',
+                       'aaaaaaaa-0000-4000-8000-000000000003');
+delete from public.bioassay_results   where batch_reference = 'DELETE-SMOKE-TEST';
+delete from public.clinical_case_data where facility_name  = 'DELETE-SMOKE-TEST';
+
+-- Outcomes are asserted by what SURVIVED rather than by rows-affected: it is the same
+-- question, and it stays correct even if the SELECT policy is ever narrowed so that A
+-- cannot see the row it just failed to delete.
+reset role;
+
+insert into _verify_results
+select 41, '4. deletion works', 'specimen_records DELETE (all 3 test rows gone)',
+       count(*)::text,
+       case when count(*) = 0 then 'PASS'
+            else 'FAIL - no DELETE policy; run add_delete_policies.sql' end
+from public.specimen_records where specimen_id::text like 'aaaaaaaa-0000-4000-8000-%';
+
+insert into _verify_results
+select 42, '4. deletion works', 'bioassay_results DELETE', count(*)::text,
+       case when count(*) = 0 then 'PASS' else 'FAIL - no DELETE policy' end
+from public.bioassay_results where batch_reference = 'DELETE-SMOKE-TEST';
+
+insert into _verify_results
+select 43, '4. deletion works', 'clinical_case_data DELETE', count(*)::text,
+       case when count(*) = 0 then 'PASS' else 'FAIL - no DELETE policy' end
+from public.clinical_case_data where facility_name = 'DELETE-SMOKE-TEST';
 
 -- =====================================================================================
 -- 5. OWNERSHIP: one investigator must not be able to delete another's data
 -- =====================================================================================
--- Everything above proves deletion *works*. This proves it is *bounded* — the opposite
--- property, and the one a passing section 4 says nothing about. A blanket
--- `using (true)` policy passes every check in section 4 while letting any signed-in
--- account wipe a colleague's field season.
---
--- The whole section is rolled back, including the temporary admin registration.
-begin;
-
--- Seed as postgres (the SQL Editor's own role, which RLS does not apply to) so the
--- starting state is guaranteed regardless of what the INSERT policies say. The point
--- under test is DELETE, not INSERT.
+-- Seeded as postgres so the starting state is guaranteed regardless of what the INSERT
+-- policies say. What is under test is DELETE, not INSERT.
 insert into public.specimen_records
   (specimen_id, collection_date, collector_id, breeding_site_type,
    field_screening_result, specimen_role)
@@ -321,142 +305,109 @@ values
    'unattributed-legacy', 'Stagnant pool',
    '{"screening_method":"manual_field_log","result":{"anopheles_count":3}}'::jsonb, 'primary');
 
--- --- Acting as investigator A -------------------------------------------------------
+-- Act as investigator A and try everything A should not be able to do.
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"11111111-1111-4111-8111-111111111111","role":"authenticated"}';
 
--- 5a. A deletes A's own row. This must succeed, or the rule has locked everyone out.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000a'
-  returning specimen_id
-)
-select 'A deletes their OWN entry' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 1 then 'PASS'
-            else 'FAIL — an investigator cannot delete their own data; '
-                 || 'check auth.uid() resolves and collector_id holds the uid as text' end
-         as verdict
-from removed;
+delete from public.specimen_records where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000a';
+delete from public.specimen_records where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000b';
+delete from public.specimen_records where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000c';
+-- And a broad, unfiltered attempt, in case a WHERE clause was the only thing stopping it.
+delete from public.specimen_records where specimen_id::text like 'bbbbbbbb-0000-4000-8000-%';
 
--- 5b. A tries to delete B's row. THE CHECK THIS FILE WAS EXTENDED FOR.
--- Zero rows is the pass. RLS refuses by matching nothing rather than raising, which is
--- exactly why this needs asserting rather than eyeballing.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000b'
-  returning specimen_id
-)
-select 'A CANNOT delete B''s entry' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 0 then 'PASS'
-            else 'FAIL — one investigator can delete another''s field data; '
-                 || 'run sql/add_ownership_delete_policies.sql' end as verdict
-from removed;
-
--- 5c. A tries to delete a pre-identity row. Nobody can claim it, so nobody but an admin
--- may remove it.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000c'
-  returning specimen_id
-)
-select 'A CANNOT delete an unattributed-legacy entry' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 0 then 'PASS'
-            else 'FAIL — an ownerless row was deletable by a non-admin' end as verdict
-from removed;
-
--- 5d. A blanket delete must not become a way around the rule: no WHERE clause, and B's
--- row plus the legacy row still have to survive.
--- The ::text cast is needed because specimen_id may be a uuid column, and `like` has no
--- operator for uuid.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id::text like 'bbbbbbbb-0000-4000-8000-%'
-  returning specimen_id
-)
-select 'An unfiltered DELETE still only takes A''s rows' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 0 then 'PASS'
-            else 'FAIL — a broad DELETE reached rows A does not own' end as verdict
-from removed;
-
--- --- Back to postgres to count survivors --------------------------------------------
--- Counted as postgres rather than as A on purpose: if the SELECT policy is ever narrowed,
--- A would simply not see B's row and this would report a false FAIL for the wrong reason.
--- What is under test is whether the row still EXISTS, not whether A can see it.
 reset role;
 
-select 'B''s entry survived everything A tried' as check_name,
-       count(*) as rows_remaining,
-       case when count(*) = 2 then 'PASS'
-            else 'FAIL — expected B''s row and the legacy row to both remain' end as verdict
-from public.specimen_records
-where specimen_id in ('bbbbbbbb-0000-4000-8000-00000000000b',
-                      'bbbbbbbb-0000-4000-8000-00000000000c');
+insert into _verify_results
+select 50, '5. ownership', 'A CAN delete their OWN entry', count(*)::text,
+       case when count(*) = 0 then 'PASS'
+            else 'FAIL - an investigator cannot delete their own data' end
+from public.specimen_records where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000a';
 
--- --- Acting as an administrator -----------------------------------------------------
--- Register one, as postgres: app_admins deliberately has no write policy, so this is the
--- only way in — which is the property being relied on. Rolled back with everything else.
+insert into _verify_results
+select 51, '5. ownership', 'A CANNOT delete B''s entry', count(*)::text,
+       case when count(*) = 1 then 'PASS'
+            else 'FAIL - one investigator can delete another''s field data' end
+from public.specimen_records where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000b';
+
+insert into _verify_results
+select 52, '5. ownership', 'A CANNOT delete an unattributed-legacy entry', count(*)::text,
+       case when count(*) = 1 then 'PASS'
+            else 'FAIL - an ownerless row was deletable by a non-admin' end
+from public.specimen_records where specimen_id = 'bbbbbbbb-0000-4000-8000-00000000000c';
+
+-- Register an admin. app_admins deliberately has no write policy, so postgres is the only
+-- way in — which is the property being relied on. Removed again below.
 insert into public.app_admins (user_id, note)
-values ('33333333-3333-4333-8333-333333333333', 'verify_deletion.sql — temporary, rolled back')
+values ('33333333-3333-4333-8333-333333333333', 'verify_deletion.sql — temporary')
 on conflict (user_id) do nothing;
 
+-- is_app_admin() depends only on auth.uid(), which reads the GUC, so these can be evaluated
+-- without switching role.
+set local request.jwt.claims = '{"sub":"33333333-3333-4333-8333-333333333333","role":"authenticated"}';
+insert into _verify_results
+select 53, '5. ownership', 'is_app_admin() TRUE for a registered admin',
+       public.is_app_admin()::text,
+       case when public.is_app_admin() then 'PASS'
+            else 'FAIL - check is_app_admin() is SECURITY DEFINER' end;
+
+-- Guards against is_app_admin() being written so it returns true for everyone. A definer
+-- function with a missing WHERE would do exactly that, and every other check in this file
+-- would still pass.
+set local request.jwt.claims = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
+insert into _verify_results
+select 54, '5. ownership', 'is_app_admin() FALSE for a normal user',
+       public.is_app_admin()::text,
+       case when public.is_app_admin() then 'FAIL - everyone is an admin; the rule is void'
+            else 'PASS' end;
+
+-- The admin exemption, actually exercised: delete B's row and the ownerless one.
 set local role authenticated;
 set local request.jwt.claims = '{"sub":"33333333-3333-4333-8333-333333333333","role":"authenticated"}';
+delete from public.specimen_records
+ where specimen_id in ('bbbbbbbb-0000-4000-8000-00000000000b',
+                       'bbbbbbbb-0000-4000-8000-00000000000c');
+reset role;
 
--- 5e. The admin sees themselves as an admin.
-select 'is_app_admin() recognises a registered admin' as check_name,
-       public.is_app_admin() as result,
-       case when public.is_app_admin() then 'PASS'
-            else 'FAIL — is_app_admin() is false for a registered admin; '
-                 || 'check it is SECURITY DEFINER' end as verdict;
-
--- 5f. The admin deletes rows belonging to B and to nobody — the exemption, working.
-with removed as (
-  delete from public.specimen_records
-   where specimen_id in ('bbbbbbbb-0000-4000-8000-00000000000b',
-                         'bbbbbbbb-0000-4000-8000-00000000000c')
-  returning specimen_id
-)
-select 'An admin CAN delete anyone''s entry' as check_name,
-       count(*) as rows_affected,
-       case when count(*) = 2 then 'PASS'
-            else 'FAIL — an admin cannot delete other investigators'' rows; '
-                 || 'check public.app_admins contains the uid' end as verdict
-from removed;
-
--- 5g. A non-admin is not accidentally an admin. Guards against is_app_admin() being
--- written so that it returns true for everyone (a `security definer` function with a
--- missing WHERE would do exactly that, and every other check here would still pass).
-set local request.jwt.claims = '{"sub":"22222222-2222-4222-8222-222222222222","role":"authenticated"}';
-select 'is_app_admin() is false for a normal user' as check_name,
-       public.is_app_admin() as result,
-       case when public.is_app_admin() then
-              'FAIL — is_app_admin() returns true for an unregistered user; '
-              || 'everyone is an admin and the rule is void'
-            else 'PASS' end as verdict;
-
--- Nothing above is kept — including the temporary admin registration.
-rollback;
+insert into _verify_results
+select 55, '5. ownership', 'An admin CAN delete anyone''s entry', count(*)::text,
+       case when count(*) = 0 then 'PASS'
+            else 'FAIL - an admin cannot delete other investigators'' rows' end
+from public.specimen_records where specimen_id::text like 'bbbbbbbb-0000-4000-8000-%';
 
 -- =====================================================================================
--- 6. Confirm the rollback left nothing behind
+-- 6. Clean up, then confirm nothing was left behind
 -- =====================================================================================
-select count(*) as leftover_test_rows,
-       case when count(*) = 0 then 'CLEAN' else 'LEFTOVERS — delete these rows' end as verdict
+-- Explicit rather than a rollback: the results table has to survive to be selected, and a
+-- rollback would take it with everything else. Any statement raising above aborts the
+-- transaction and undoes all of this anyway.
+delete from public.specimen_records
+ where specimen_id::text like 'aaaaaaaa-0000-4000-8000-%'
+    or specimen_id::text like 'bbbbbbbb-0000-4000-8000-%';
+delete from public.bioassay_results   where batch_reference = 'DELETE-SMOKE-TEST';
+delete from public.clinical_case_data where facility_name  = 'DELETE-SMOKE-TEST';
+delete from public.app_admins where user_id = '33333333-3333-4333-8333-333333333333';
+
+insert into _verify_results
+select 60, '6. cleanup', 'no test rows left behind', count(*)::text,
+       case when count(*) = 0 then 'CLEAN' else 'LEFTOVERS - delete these rows' end
 from (
   select 1 from public.specimen_records
-   where collector_id in ('delete-smoke-test',
-                          '11111111-1111-4111-8111-111111111111',
-                          '22222222-2222-4222-8222-222222222222')
+   where specimen_id::text like 'aaaaaaaa-0000-4000-8000-%'
       or specimen_id::text like 'bbbbbbbb-0000-4000-8000-%'
-  union all
-  select 1 from public.bioassay_results where batch_reference = 'DELETE-SMOKE-TEST'
-  union all
-  select 1 from public.clinical_case_data where facility_name = 'DELETE-SMOKE-TEST'
-  union all
-  select 1 from public.app_admins
-   where user_id = '33333333-3333-4333-8333-333333333333'
-) as test_rows;
+  union all select 1 from public.bioassay_results   where batch_reference = 'DELETE-SMOKE-TEST'
+  union all select 1 from public.clinical_case_data where facility_name  = 'DELETE-SMOKE-TEST'
+) as leftovers;
+
+insert into _verify_results
+select 61, '6. cleanup', 'temporary admin removed', count(*)::text,
+       case when count(*) = 0 then 'CLEAN' else 'LEFTOVERS - remove this app_admins row' end
+from public.app_admins where user_id = '33333333-3333-4333-8333-333333333333';
+
+commit;
+
+-- =====================================================================================
+-- THE RESULT. This must stay the last statement in the file.
+-- =====================================================================================
+select section, check_name, detail, verdict
+from _verify_results
+order by seq, check_name;
