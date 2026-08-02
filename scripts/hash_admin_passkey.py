@@ -35,6 +35,56 @@ from utils.auth import _PBKDF2_DEFAULT_ITERATIONS, hash_admin_password  # noqa: 
 _MIN_PASSKEY_LENGTH = 12
 
 
+def _too_short(passkey: str) -> bool:
+    return len(passkey) < _MIN_PASSKEY_LENGTH
+
+
+def _read_passkey() -> str | None:
+    """The passkey, or None (with the reason printed) if it could not be read.
+
+    Two paths, chosen by whether stdin is a terminal:
+
+    Interactive — getpass, twice, hidden. Nothing echoes as you type, which looks a lot
+    like the script having frozen; the prompt says so.
+
+    Piped — plain stdin, once. getpass on Windows reads the *console* directly rather than
+    stdin, so a piped passkey is ignored and the script blocks forever waiting for a
+    console that isn't there. That is not a hypothetical: it hangs under Git Bash/MinTTY
+    and anywhere else stdin is not a real Windows console. Detecting it here is what keeps
+    `echo … | python scripts/hash_admin_passkey.py` from silently wedging the terminal.
+    There is no confirmation prompt on this path — there is nothing to re-prompt.
+    """
+    if sys.stdin.isatty():
+        passkey = getpass.getpass("Admin delete passkey (typing is hidden): ")
+        if not passkey:
+            print("error: passkey must not be empty", file=sys.stderr)
+            return None
+        if _too_short(passkey):
+            print(
+                f"error: passkey must be at least {_MIN_PASSKEY_LENGTH} characters — "
+                "this one guards deleting every entry in the project",
+                file=sys.stderr,
+            )
+            return None
+        if passkey != getpass.getpass("Confirm passkey: "):
+            print("error: passkeys did not match", file=sys.stderr)
+            return None
+        return passkey
+
+    passkey = sys.stdin.readline().rstrip("\n").rstrip("\r")
+    if not passkey:
+        print("error: no passkey on stdin", file=sys.stderr)
+        return None
+    if _too_short(passkey):
+        print(
+            f"error: passkey must be at least {_MIN_PASSKEY_LENGTH} characters — "
+            "this one guards deleting every entry in the project",
+            file=sys.stderr,
+        )
+        return None
+    return passkey
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate an ADMIN_DELETE_PASSKEY_HASH value.")
     parser.add_argument(
@@ -49,19 +99,8 @@ def main() -> int:
         print("error: --iterations must be a positive integer", file=sys.stderr)
         return 2
 
-    passkey = getpass.getpass("Admin delete passkey: ")
-    if not passkey:
-        print("error: passkey must not be empty", file=sys.stderr)
-        return 2
-    if len(passkey) < _MIN_PASSKEY_LENGTH:
-        print(
-            f"error: passkey must be at least {_MIN_PASSKEY_LENGTH} characters — "
-            "this one guards deleting every entry in the project",
-            file=sys.stderr,
-        )
-        return 2
-    if passkey != getpass.getpass("Confirm passkey: "):
-        print("error: passkeys did not match", file=sys.stderr)
+    passkey = _read_passkey()
+    if passkey is None:
         return 2
 
     digest = hash_admin_password(passkey, iterations=args.iterations)
