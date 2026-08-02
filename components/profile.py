@@ -19,6 +19,7 @@ from utils.auth import (
     get_current_user_email,
     get_current_user_id,
     get_supabase_client,
+    is_current_user_admin,
     sign_out_user,
 )
 from utils.logging_config import get_logger
@@ -206,21 +207,35 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
         "first. There is no undo."
     )
 
+    # Project-wide options are offered only to registered admins. The database refuses
+    # them either way (sql/add_ownership_delete_policies.sql), so showing them to everyone
+    # would only mean presenting a control that silently does a fraction of what it says.
+    is_admin = is_current_user_admin()
+    scopes = [_RESET_SCOPE_MINE] + ([_RESET_SCOPE_ALL] if is_admin else [])
+
     scope = st.radio(
         "What to clear",
-        [_RESET_SCOPE_MINE, _RESET_SCOPE_ALL],
+        scopes,
         key="reset_scope",
         help=(
             "Scoping to your own records leaves other investigators' data untouched. "
             "Clearing everything is for a project you alone are using."
+            if is_admin else
+            "You can clear the records you collected. Clearing the whole project is "
+            "restricted to administrators."
         ),
     )
     if scope == _RESET_SCOPE_MINE and not current_uid:
         st.warning("No signed-in user id available, so records cannot be scoped to you.")
         return
 
-    also_bioassay = st.checkbox("Also clear all bioassay results", key="reset_bioassay")
-    also_clinical = st.checkbox("Also clear all clinical case records", key="reset_clinical")
+    if is_admin:
+        also_bioassay = st.checkbox("Also clear all bioassay results", key="reset_bioassay")
+        also_clinical = st.checkbox("Also clear all clinical case records", key="reset_clinical")
+    else:
+        # Neither table has a per-investigator reset — they clear wholesale or not at all —
+        # so for a non-admin there is nothing here to offer.
+        also_bioassay = also_clinical = False
 
     if scope == _RESET_SCOPE_ALL or also_bioassay or also_clinical:
         st.warning(

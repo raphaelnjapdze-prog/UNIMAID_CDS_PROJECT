@@ -93,6 +93,19 @@ ADMIN_EMAIL = get_secret("ADMIN_EMAIL", "admin@localhost")
 ADMIN_PASSWORD = get_secret("ADMIN_PASSWORD")
 ADMIN_PASSWORD_HASH = get_secret("ADMIN_PASSWORD_HASH")
 
+# Second gate in front of the admin bulk delete ("remove every entry in the project"),
+# asked for on top of being a registered admin. Same PBKDF2 format as ADMIN_PASSWORD_HASH;
+# generate one with scripts/hash_admin_passkey.py. There is deliberately no plaintext
+# fallback and no default: if this is unset the bulk delete stays disabled, because the
+# alternative — a wipe reachable by anyone who reaches the page — is worse than a feature
+# that has to be configured before it works.
+#
+# It is a confirmation step, not the security boundary. Who may delete what is enforced by
+# RLS (sql/add_ownership_delete_policies.sql); a registered admin holding their own JWT
+# could delete through the API without ever seeing this prompt. What it buys is that a
+# logged-in admin's unattended session, or a misclick, cannot empty the project.
+ADMIN_DELETE_PASSKEY_HASH = get_secret("ADMIN_DELETE_PASSKEY_HASH")
+
 # Ensure upload directory exists right away
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)

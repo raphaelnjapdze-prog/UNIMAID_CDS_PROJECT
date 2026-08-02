@@ -33,6 +33,7 @@ from utils.auth import (
     get_current_user_id,
     get_supabase_client,
     get_supabase_service_client,
+    is_current_user_admin,
     is_network_error,
 )
 from utils.logging_config import get_logger
@@ -915,6 +916,40 @@ _PHOTO_BUCKET = "specimen-photos"
 _DELETE_CHUNK = 80
 
 
+def owns_row(row: dict, user_id: str) -> bool:
+    """Whether `user_id` recorded `row`.
+
+    Ownership is the collector_id stamped at write time by require_current_user_id(), so
+    it is exactly "who saved this". Rows marked 'unattributed-legacy' predate identity
+    tracking and belong to nobody: they match no user here, which leaves them deletable
+    only by an admin. That is the honest answer — their author was never recorded and
+    cannot be recovered, so no one can claim them.
+    """
+    if not isinstance(row, dict) or not user_id:
+        return False
+    return str(row.get("collector_id") or "").strip() == str(user_id).strip()
+
+
+def _partition_by_ownership(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Split rows into (deletable by the current user, refused).
+
+    An admin gets everything in the first list. Everyone else gets only their own.
+
+    This mirrors the database rather than replacing it: sql/add_ownership_delete_policies.sql
+    is what actually stops the delete, and it would stop it whether or not this function
+    existed. Doing it here too means the refusal can be *explained* — RLS just matches
+    zero rows, which arrives looking identical to "already deleted", and a user told
+    "0 rows deleted" learns nothing about why.
+    """
+    if is_current_user_admin():
+        return list(rows), []
+
+    user_id = (get_current_user_id() or "").strip()
+    allowed = [row for row in rows if owns_row(row, user_id)]
+    refused = [row for row in rows if not owns_row(row, user_id)]
+    return allowed, refused
+
+
 def _chunked(items: list, size: int = _DELETE_CHUNK):
     for start in range(0, len(items), size):
         yield items[start:start + size]
@@ -1105,6 +1140,14 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
       tally_failures     batch ids whose tally could NOT be corrected — their totals
                          are now short by the deleted children, and the caller must
                          surface this rather than swallow it
+      refused_not_yours  ids skipped because they belong to another investigator. A
+                         partial delete must say which part it declined and why, or the
+                         caller reports a clean sweep over rows that are still there
+
+    A user may delete only the entries they recorded; a registered admin may delete any.
+    The database enforces the same rule in the DELETE policy, so this is not the thing
+    standing between one investigator and another's field data — it is what turns the
+    database's silent "zero rows matched" into a sentence naming the reason.
     """
     client = get_supabase_client()
     if client is None:
@@ -1121,6 +1164,19 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
         st.error(
             "None of the selected entries could be read back, so nothing was deleted. "
             "They may already be gone, or hidden from this account by row-level security."
+        )
+        return None
+
+    # Ownership, before anything is touched. The database enforces this independently
+    # (sql/add_ownership_delete_policies.sql) and would refuse these rows anyway — but an
+    # RLS refusal is indistinguishable from "already gone", so the reason is established
+    # here, while the rows are still in hand to name.
+    rows, refused = _partition_by_ownership(rows)
+    if not rows:
+        st.error(
+            f"{len(refused)} selected entr{'y belongs' if len(refused) == 1 else 'ies belong'} "
+            "to another investigator, so nothing was deleted. You can only delete entries you "
+            "recorded yourself."
         )
         return None
 
@@ -1209,6 +1265,7 @@ def delete_specimen_records(specimen_ids, *, remove_photos: bool = True) -> dict
         "batches_restored": {p: c for p, c in restore.items() if p not in tally_failures},
         "tally_failures": tally_failures,
         "not_deleted": [sid for sid in ids if sid not in deleted_set],
+        "refused_not_yours": [r["specimen_id"] for r in refused if r.get("specimen_id")],
     }
 
 
@@ -1217,7 +1274,21 @@ def delete_all_specimen_records(*, collector_id: str | None = None) -> dict | No
 
     The bulk reset behind "start a clean trial". Scoping to a collector keeps one
     investigator's demo run from wiping a colleague's real records off a shared project.
+
+    Unscoped — every row in the project, whoever recorded it — is an admin action, and is
+    refused here for anyone else. A non-admin calling this without a collector_id would
+    otherwise list every id in the table and hand them all to delete_specimen_records(),
+    which would refuse them one by one and report a confusing pile of refusals for what
+    was really a single unauthorised request. Callers that mean "clear my own entries"
+    should pass their own id; UI callers get it from require_current_user_id().
     """
+    if collector_id is None and not is_current_user_admin():
+        st.error(
+            "Only a registered administrator can delete every entry in the project. "
+            "To clear your own entries, use the delete options on the Site Log page."
+        )
+        return None
+
     client = get_supabase_client()
     if client is None:
         st.error("Supabase is not configured — nothing can be deleted.")
@@ -1239,6 +1310,7 @@ def delete_all_specimen_records(*, collector_id: str | None = None) -> dict | No
             "requested": 0, "deleted": 0, "cascaded_children": 0, "photos_removed": 0,
             "photos_orphaned": 0,
             "batches_restored": {}, "tally_failures": [], "not_deleted": [],
+            "refused_not_yours": [],
         }
     return delete_specimen_records(ids)
 
@@ -1275,7 +1347,21 @@ def _discover_key_column(table: str) -> str | None:
 
 def _delete_all_rows(table: str, clear_cache) -> int | None:
     """Delete every row in `table`. Returns the number deleted, or None if the table's
-    key column could not be identified or the database refused the delete."""
+    key column could not be identified or the database refused the delete.
+
+    Admin-only, because there is no scoped form of it: bioassay_results and
+    clinical_case_data are cleared wholesale or not at all. Without this guard a
+    non-admin's "also clear bioassay results" would list every row in the project, delete
+    the handful RLS allows, and report that number as though it were the table — a
+    partial wipe presented as a clean one.
+    """
+    if not is_current_user_admin():
+        st.error(
+            f"Only a registered administrator can clear all {table.replace('_', ' ')}. "
+            "There is no per-investigator version of this reset."
+        )
+        return None
+
     client = get_supabase_client()
     if client is None:
         st.error("Supabase is not configured — nothing can be deleted.")

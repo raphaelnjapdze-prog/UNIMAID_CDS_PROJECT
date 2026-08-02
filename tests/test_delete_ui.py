@@ -41,6 +41,11 @@ def site_log(monkeypatch):
         }
 
     monkeypatch.setattr(site_log, "delete_specimen_records", fake_delete)
+    # Deletion is ownership-scoped, so the page needs to know who is looking: these rows
+    # are stamped collector_id="me", and a picker that does not know it is "me" correctly
+    # shows nothing at all.
+    monkeypatch.setattr(site_log, "get_current_user_id", lambda: "me")
+    monkeypatch.setattr(site_log, "is_current_user_admin", lambda: False)
     monkeypatch.setattr(
         site_log, "load_specimen_records",
         lambda: pd.DataFrame([_row("batch-1"), _row("batch-2", date="2026-07-19")]),
@@ -147,6 +152,8 @@ class TestFailedDeleteIsNotReportedAsSuccess:
         monkeypatch.setattr(site_log, "delete_specimen_records", lambda *_a, **_k: None)
         monkeypatch.setattr(site_log, "load_specimen_records", lambda: pd.DataFrame([_row("batch-1")]))
         monkeypatch.setattr(site_log, "fetch_batch_children", lambda _b: pd.DataFrame())
+        monkeypatch.setattr(site_log, "get_current_user_id", lambda: "me")
+        monkeypatch.setattr(site_log, "is_current_user_admin", lambda: False)
 
         at = AppTest.from_function(_recent_entries_app, default_timeout=30)
         at.run()

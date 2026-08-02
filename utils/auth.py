@@ -13,6 +13,7 @@ from datetime import datetime
 import streamlit as st
 
 from utils.config import (
+    ADMIN_DELETE_PASSKEY_HASH,
     ADMIN_EMAIL,
     ADMIN_PASSWORD,
     ADMIN_PASSWORD_HASH,
@@ -29,6 +30,15 @@ logger = get_logger(__name__)
 # starts just under the wire must not land after the token has died, and the refresh
 # round-trip itself takes time — so we renew with a margin rather than at the last second.
 _TOKEN_REFRESH_SKEW_SECONDS = 120
+
+# The offline fallback account's user id. Not a Supabase uid — it exists for when Supabase
+# is unreachable, which is exactly when app_admins cannot be consulted.
+LOCAL_ADMIN_USER_ID = "local-admin"
+
+# Session-state key holding the cached app_admins verdict. Written by is_current_user_admin,
+# and cleared on both sign-in and sign-out so a verdict never outlives the account it was
+# computed for.
+_ADMIN_FLAG_KEY = "is_app_admin"
 
 
 def _jwt_exp(token: str):
@@ -209,6 +219,10 @@ def set_authenticated(user, provider="supabase"):
         metadata = getattr(user, "user_metadata", None) or {}
         st.session_state["auth_user_name"] = metadata.get("full_name")
     st.session_state["login_time"] = datetime.now()
+    # Whoever just signed in gets their own admin lookup. A stale verdict here would be
+    # the previous account's — restore_session() reaches this path too, so it is not
+    # enough to clear it only on sign-out.
+    st.session_state.pop(_ADMIN_FLAG_KEY, None)
 
 
 # --- LOCAL-ADMIN PASSWORD HASHING ------------------------------------------
@@ -233,8 +247,13 @@ def hash_admin_password(password: str, *, iterations: int = _PBKDF2_DEFAULT_ITER
     return f"{_PBKDF2_ALGORITHM}${iterations}${salt.hex()}${derived.hex()}"
 
 
-def _verify_pbkdf2(submitted: str, encoded: str) -> bool:
-    """Constant-time check of ``submitted`` against an encoded PBKDF2 digest."""
+def _verify_pbkdf2(submitted: str, encoded: str, *, label: str = "ADMIN_PASSWORD_HASH") -> bool:
+    """Constant-time check of ``submitted`` against an encoded PBKDF2 digest.
+
+    ``label`` names the secret in the log line. More than one credential uses this format
+    now, and "ADMIN_PASSWORD_HASH is malformed" while the actual broken secret was the
+    delete passkey would send whoever reads the log to the wrong setting.
+    """
     try:
         algorithm, iterations_s, salt_hex, hash_hex = encoded.split("$")
         iterations = int(iterations_s)
@@ -243,11 +262,11 @@ def _verify_pbkdf2(submitted: str, encoded: str) -> bool:
     except (ValueError, AttributeError):
         # A malformed hash must never authenticate anyone — and it means the
         # deployment is misconfigured, so surface it rather than silently deny.
-        logger.warning("ADMIN_PASSWORD_HASH is malformed; local-admin login disabled.")
+        logger.warning("%s is malformed; the credential it guards is disabled.", label)
         return False
     if algorithm != _PBKDF2_ALGORITHM:
-        logger.warning("ADMIN_PASSWORD_HASH uses unsupported algorithm %r; login disabled.",
-                       algorithm)
+        logger.warning("%s uses unsupported algorithm %r; the credential it guards is disabled.",
+                       label, algorithm)
         return False
     derived = hashlib.pbkdf2_hmac("sha256", submitted.encode("utf-8"), salt, iterations)
     return hmac.compare_digest(derived, expected)
@@ -268,6 +287,32 @@ def _verify_admin_password(submitted: str) -> bool:
     if ADMIN_PASSWORD:
         return hmac.compare_digest(submitted, ADMIN_PASSWORD)
     return False
+
+
+def verify_admin_passkey(submitted: str) -> bool:
+    """Whether ``submitted`` matches ADMIN_DELETE_PASSKEY_HASH.
+
+    The second gate in front of the admin bulk delete. Fails closed twice over: an empty
+    entry is refused without touching the hash, and an unconfigured ADMIN_DELETE_PASSKEY_HASH
+    refuses everything rather than defaulting to open. A project-wide wipe that works out of
+    the box, before anyone has chosen a passkey, is the failure mode worth designing against.
+
+    No plaintext fallback, unlike _verify_admin_password — that one carries ADMIN_PASSWORD
+    for backward compatibility with deployments that predate the hash. This credential is
+    new, so there is nothing to be compatible with and no reason to accept a weaker form.
+    """
+    if not submitted or not ADMIN_DELETE_PASSKEY_HASH:
+        return False
+    return _verify_pbkdf2(submitted, ADMIN_DELETE_PASSKEY_HASH, label="ADMIN_DELETE_PASSKEY_HASH")
+
+
+def admin_passkey_configured() -> bool:
+    """Whether a delete passkey has been set at all.
+
+    Lets the UI say "ask the project owner to configure ADMIN_DELETE_PASSKEY_HASH" instead
+    of presenting a prompt that cannot succeed no matter what is typed into it.
+    """
+    return bool(ADMIN_DELETE_PASSKEY_HASH)
 
 
 def sign_in_user(email: str, password: str):
@@ -361,6 +406,11 @@ def _clear_auth_state():
     st.session_state["auth_user_name"] = None
     st.session_state["sb_access_token"] = None
     st.session_state["sb_refresh_token"] = None
+    # The cached admin verdict belongs to the account that just left. Leaving it behind
+    # would hand the next person to sign in on this session the previous user's
+    # privileges in the UI — the database would still refuse them, but offering a
+    # project-wide wipe to someone who is not an admin is not a prompt worth drawing.
+    st.session_state.pop(_ADMIN_FLAG_KEY, None)
 
 
 def _adopt_session(auth_response, fallback_access: str = "", fallback_refresh: str = "") -> bool:
@@ -466,6 +516,56 @@ def get_current_user_email() -> str:
 def get_current_user_id() -> str:
     """Returns the unique identifier of the logged-in investigator."""
     return st.session_state.get("auth_user_id", "")
+
+
+def is_current_user_admin() -> bool:
+    """Whether the signed-in account is registered in public.app_admins.
+
+    This decides what the UI *offers*. It is not what enforces anything: the database
+    answers the same question independently in the DELETE policies
+    (sql/add_ownership_delete_policies.sql), so a forged session-state flag buys nothing —
+    the delete still matches zero rows. Keep it that way; don't let this become the only
+    check in front of a destructive path.
+
+    Fails closed. An unreachable database, a missing app_admins table (the migration not
+    run yet), or no signed-in user all return False, which hides the bulk-delete controls
+    rather than exposing them to whoever happens to be looking.
+
+    Cached in session state because it is read on every rerun of the page that draws those
+    controls, and it is a network round-trip. Revoking someone's admin row therefore takes
+    effect on their next sign-in, not mid-session — acceptable for a roster that changes
+    about never, and the database is still the thing saying no in the meantime.
+    """
+    cached = st.session_state.get(_ADMIN_FLAG_KEY)
+    if isinstance(cached, bool):
+        return cached
+
+    user_id = (get_current_user_id() or "").strip()
+    if not user_id:
+        return False
+
+    # The offline fallback account exists precisely for when Supabase is unavailable, so
+    # there is no app_admins table to consult; it is an administrator by construction.
+    if user_id == LOCAL_ADMIN_USER_ID:
+        st.session_state[_ADMIN_FLAG_KEY] = True
+        return True
+
+    client = get_supabase_client()
+    if client is None:
+        return False
+
+    try:
+        response = client.table("app_admins").select("user_id").eq("user_id", user_id).execute()
+        is_admin = bool(getattr(response, "data", None))
+    except Exception:
+        # Most likely the migration has not been run and the table does not exist. Not an
+        # error worth interrupting anyone over — it just means nobody is an admin yet.
+        logger.debug("Could not read app_admins for %s; treating as non-admin", user_id,
+                     exc_info=True)
+        return False
+
+    st.session_state[_ADMIN_FLAG_KEY] = is_admin
+    return is_admin
 
 
 def get_display_name() -> str:

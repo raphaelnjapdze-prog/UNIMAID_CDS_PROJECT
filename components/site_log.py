@@ -13,13 +13,21 @@ from datetime import date
 import pandas as pd
 import streamlit as st
 
+from utils.auth import (
+    admin_passkey_configured,
+    get_current_user_id,
+    is_current_user_admin,
+    verify_admin_passkey,
+)
 from utils.data_manager import (
     available_to_vial,
     clear_specimen_records_cache,
+    delete_all_specimen_records,
     delete_specimen_records,
     extract_collector_display,
     fetch_batch_children,
     load_specimen_records,
+    owns_row,
     submit_site_log_entry,
     sync_pending_writes,
     vial_out_specimens,
@@ -466,10 +474,25 @@ def _render_delete_entries(log_df: pd.DataFrame) -> None:
             "there is no undo, and real field data deleted here is gone."
         )
 
+        # Only your own entries, unless you are a registered admin. The database refuses
+        # the rest either way (sql/add_ownership_delete_policies.sql); leaving them in the
+        # picker would just mean offering a checkbox that cannot do anything.
         rows = log_df.to_dict("records")
+        is_admin = is_current_user_admin()
+        if not is_admin:
+            user_id = get_current_user_id()
+            mine = [row for row in rows if owns_row(row, user_id)]
+            hidden = len(rows) - len(mine)
+            rows = mine
+            if hidden:
+                st.caption(
+                    f"{hidden} entr{'y' if hidden == 1 else 'ies'} recorded by other "
+                    "investigators are not shown — you can only delete your own."
+                )
+
         labels = {_entry_label(row): row["specimen_id"] for row in rows if row.get("specimen_id")}
         if not labels:
-            st.info("No entries available to delete.")
+            st.info("No entries of yours are available to delete.")
             return
 
         chosen = st.multiselect(
@@ -512,6 +535,73 @@ def _render_delete_entries(log_df: pd.DataFrame) -> None:
                 st.session_state.pop("sitelog_delete_pick", None)
                 st.rerun()
 
+    if is_admin:
+        _render_admin_bulk_delete()
+
+
+def _render_admin_bulk_delete() -> None:
+    """Delete every entry in the project — admin only, behind the delete passkey.
+
+    Two independent things have to be true: the account is registered in public.app_admins,
+    which is what the database checks in its DELETE policy, and the passkey is entered here.
+    The passkey is not the authority — a registered admin holding their own token could
+    delete through the API without ever loading this page. It is here so that being signed
+    in as an admin is not by itself enough to empty the project: an unattended session, a
+    borrowed laptop, or a misclick has to get past something the admin knows.
+
+    Kept separate from the picker above rather than added as a "select all" option, because
+    the two differ in kind. That deletes entries you can see and chose; this deletes
+    everyone's, including entries this page never listed.
+    """
+    st.markdown("---")
+    with st.expander("🛑 Administrator: delete every entry in the project"):
+        st.warning(
+            "This removes **every specimen entry recorded by anyone**, their vialed-out "
+            "individuals, and their photos — not just yours. It is for clearing a project "
+            "between trials. There is no undo."
+        )
+
+        if not admin_passkey_configured():
+            st.info(
+                "No delete passkey is configured, so this is disabled. Generate one with "
+                "`python scripts/hash_admin_passkey.py` and set `ADMIN_DELETE_PASSKEY_HASH` "
+                "in the app's secrets."
+            )
+            return
+
+        passkey = st.text_input(
+            "Administrator delete passkey",
+            key="sitelog_admin_passkey",
+            type="password",
+            help="Set separately from your login password. Ask the project owner if unsure.",
+        )
+        typed = st.text_input(
+            "Type DELETE EVERYTHING to confirm",
+            key="sitelog_admin_confirm",
+            placeholder="DELETE EVERYTHING",
+        )
+
+        ready = typed.strip().upper() == "DELETE EVERYTHING" and bool(passkey)
+        if not st.button(
+            "Delete every entry permanently", type="primary",
+            key="sitelog_admin_go", disabled=not ready,
+        ):
+            return
+
+        # Checked on click, not while typing: verifying on every keystroke would run PBKDF2
+        # 240,000 times per character and turn a wrong passkey into a visibly slower page.
+        if not verify_admin_passkey(passkey):
+            st.error("That passkey is not correct. Nothing was deleted.")
+            return
+
+        with st.spinner("Deleting every entry, linked specimen and photo…"):
+            summary = delete_all_specimen_records()
+        if summary:
+            st.session_state["sitelog_delete_summary"] = summary
+            st.session_state.pop("sitelog_admin_passkey", None)
+            st.session_state.pop("sitelog_admin_confirm", None)
+            st.rerun()
+
 
 def _render_delete_summary() -> None:
     """Report the last deletion after the rerun that performed it, including the parts
@@ -531,6 +621,13 @@ def _render_delete_summary() -> None:
         st.info(
             "Specimens returned to their batch counts, so the collection totals stay "
             "intact and they can be vialed out again."
+        )
+    if summary.get("refused_not_yours"):
+        count = len(summary["refused_not_yours"])
+        st.warning(
+            f"{count} selected entr{'y was' if count == 1 else 'ies were'} left alone "
+            "because another investigator recorded them. You can only delete entries you "
+            "recorded yourself."
         )
     if summary.get("not_deleted"):
         st.warning(

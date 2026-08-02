@@ -190,10 +190,18 @@ def _child(specimen_id, parent="batch-1", *, genus="Anopheles", identified=False
 
 @pytest.fixture
 def fake(monkeypatch):
-    """Point data_manager at an in-memory database. Returns a factory."""
-    def build(tables=None, objects=None):
+    """Point data_manager at an in-memory database. Returns a factory.
+
+    Identity is part of the setup now that deletion is ownership-scoped: the caller is
+    "me" unless told otherwise, which is the collector the row builders above stamp by
+    default, and is not an admin. Tests about the ownership rule itself pass `user=` or
+    `admin=` explicitly rather than relying on the default.
+    """
+    def build(tables=None, objects=None, *, user="me", admin=False):
         client = FakeSupabase(tables, objects)
         monkeypatch.setattr(dm, "get_supabase_client", lambda: client)
+        monkeypatch.setattr(dm, "get_current_user_id", lambda: user)
+        monkeypatch.setattr(dm, "is_current_user_admin", lambda: admin)
         monkeypatch.setattr(dm, "clear_specimen_records_cache", lambda: None)
         monkeypatch.setattr(dm, "clear_bioassay_results_cache", lambda: None)
         monkeypatch.setattr(dm, "clear_clinical_case_data_cache", lambda: None)
@@ -469,10 +477,11 @@ class TestBulkReset:
         assert client.ids() == ["theirs-1"]
 
     def test_unscoped_clears_everything(self, fake):
+        """Unscoped means everyone's, so it is an admin action."""
         client = fake({"specimen_records": [
             _batch("mine-1", collector="me"),
             _batch("theirs-1", collector="someone-else"),
-        ]})
+        ]}, admin=True)
 
         dm.delete_all_specimen_records()
 
@@ -491,46 +500,50 @@ class TestBulkReset:
         assert client.ids() == []
 
     def test_empty_ledger_is_not_an_error(self, fake):
-        fake({"specimen_records": []})
+        fake({"specimen_records": []}, admin=True)
         summary = dm.delete_all_specimen_records()
         assert summary == {
             "requested": 0, "deleted": 0, "cascaded_children": 0, "photos_removed": 0,
             "photos_orphaned": 0,
             "batches_restored": {}, "tally_failures": [], "not_deleted": [],
+            "refused_not_yours": [],
         }
 
 
 class TestSideTables:
+    """These clear a table wholesale — there is no per-investigator form — so they are
+    admin-only. The admin=True on each build is that rule, not incidental setup."""
+
     def test_bioassay_rows_are_deleted(self, fake):
         client = fake({"bioassay_results": [
             {"id": 1, "treatment_name": "Permethrin"},
             {"id": 2, "treatment_name": "DDT"},
-        ]})
+        ]}, admin=True)
 
         assert dm.delete_all_bioassay_results() == 2
         assert client.tables["bioassay_results"] == []
 
     def test_clinical_rows_are_deleted(self, fake):
-        client = fake({"clinical_case_data": [{"id": "a"}, {"id": "b"}, {"id": "c"}]})
+        client = fake({"clinical_case_data": [{"id": "a"}, {"id": "b"}, {"id": "c"}]}, admin=True)
 
         assert dm.delete_all_clinical_case_data() == 3
         assert client.tables["clinical_case_data"] == []
 
     def test_an_already_empty_table_is_zero_not_a_failure(self, fake):
-        fake({"bioassay_results": []})
+        fake({"bioassay_results": []}, admin=True)
         assert dm.delete_all_bioassay_results() == 0
 
     def test_an_unrecognised_key_column_deletes_nothing(self, fake):
         """Both side tables predate their schema file and may have drifted from it, so the
         key column is discovered at runtime. Guessing one would either raise on every
         delete or silently match nothing — so it refuses instead."""
-        client = fake({"bioassay_results": [{"assay_date": "2026-07-01", "treatment_name": "x"}]})
+        client = fake({"bioassay_results": [{"assay_date": "2026-07-01", "treatment_name": "x"}]}, admin=True)
 
         assert dm.delete_all_bioassay_results() is None
         assert len(client.tables["bioassay_results"]) == 1
 
     def test_a_blocked_delete_returns_none(self, fake):
-        client = fake({"clinical_case_data": [{"id": "a"}]})
+        client = fake({"clinical_case_data": [{"id": "a"}]}, admin=True)
         client.blocked_deletes.add("clinical_case_data")
 
         assert dm.delete_all_clinical_case_data() is None
