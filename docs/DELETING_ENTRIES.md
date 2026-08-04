@@ -27,11 +27,21 @@ Two consequences worth knowing:
 
 ## One-time setup
 
-Run **`sql/add_delete_policies.sql`** and then **`sql/add_ownership_delete_policies.sql`**
-in the Supabase SQL Editor. The second replaces the first migration's blanket
-"any authenticated user may delete anything" policies with the ownership rule above, so
-run them in that order — or just run the ownership one on a fresh database, which is
-self-contained.
+In the Supabase SQL Editor, run in this order:
+
+1. **`sql/add_delete_policies.sql`**
+2. **`sql/add_ownership_delete_policies.sql`** — replaces the first migration's blanket
+   "any authenticated user may delete anything" policies with the ownership rule above.
+   On a fresh database this one is self-contained, so you can skip straight to it.
+3. `python scripts/migrate_photo_paths.py --apply` — moves existing photo objects onto the
+   owner-prefixed path (see [Photo objects](#photo-objects-carry-their-owner) below).
+   Needs `SUPABASE_SERVICE_ROLE_KEY`.
+4. **`sql/add_photo_ownership.sql`** — applies the same ownership rule to the
+   `specimen-photos` bucket.
+
+Steps 3 and 4 are in that order on purpose. Neither is destructive the other way round, but
+applying the policy before moving the objects leaves every un-migrated photo admin-only to
+delete, which looks like deletion having broken.
 
 ### Registering an administrator
 
@@ -143,16 +153,22 @@ Use this when a few test rows need to go and the rest of the data is real.
 2. Optionally also tick **bioassay results** and **clinical case records**. These two are
    always project-wide; they carry no per-collector scoping, which is why they are
    **admin-only** and the checkboxes do not appear otherwise.
-3. Type `RESET` and press **Delete logged data permanently**.
+3. If anything you picked reaches beyond your own records — the project-wide scope, or
+   either side table — an **Administrator delete passkey** field appears. Enter it.
+4. Type `RESET` and press **Delete logged data permanently**.
 
-This is the "clean slate before a presentation" path.
+This is the "clean slate before a presentation" path, and it is the **only** project-wide
+delete in the app.
 
-There is a second route to the same thing, for an admin already on the Site Log page:
-**Site Log → 🗑️ Delete entries → 🛑 Administrator: delete every entry in the project**. It
-asks for the delete passkey and the phrase `DELETE EVERYTHING`. It is kept separate from
-the picker above rather than offered as a "select all", because the two differ in kind:
-the picker deletes entries you can see and chose, this deletes everyone's — including
-entries the page never listed.
+The Site Log page used to carry a second one (*🛑 Administrator: delete every entry in the
+project*). It has been removed. There were two controls doing the same irreversible thing
+with different confirmations, and the split was worse than redundant: the Site Log copy
+asked for the delete passkey, while this one — reachable just by picking "Every record in
+the project" from the radio — did not. The passkey now guards the single remaining path.
+
+Scoping the reset to your own records does **not** ask for the passkey. Clearing a trial
+run you logged yourself is an ordinary action; the passkey is there for the administrative
+one.
 
 The Dashboard reads through a 60-second cache, so give it up to a minute or reload the
 page before screenshotting the cleared state.
@@ -208,26 +224,62 @@ The app reports partial failures rather than showing a clean-looking success:
   not refuse loudly: a delete with no matching policy comes back as an empty success, so
   the app counts the objects the bucket confirms and reports the difference rather than
   taking the call at its word. The records are already gone, so nothing points at those
-  files any more, but they still use quota and are still served at their public URL. Run
-  `sql/add_delete_policies.sql`, which adds the DELETE policy on `storage.objects` for the
-  `specimen-photos` bucket, then clear the leftovers under **Storage** in the dashboard.
+  files any more, but they still use quota and are still served at their public URL. Two
+  causes, in likelihood order: the objects predate the ownership migration and are not yet
+  owner-prefixed (run `python scripts/migrate_photo_paths.py --apply`), or the bucket has
+  no DELETE policy at all (run `sql/add_photo_ownership.sql`). Then clear any leftovers
+  under **Storage** in the dashboard.
 
-## A known gap: photo objects are not ownership-scoped
+## Photo objects carry their owner
 
-The ownership rule covers table rows. It does **not** cover the `specimen-photos` bucket:
-any authenticated user still holds DELETE on it. Two things block the obvious fix, and
-both are worth knowing rather than assuming it is covered:
+The ownership rule covers the `specimen-photos` bucket too, and the mechanism is worth
+knowing because it constrains where photos may be stored.
 
-- Objects are stored at `{specimen_id}/{uuid}.ext`, with no owner anywhere in the path, so
-  a policy cannot tell whose photo it is from the path alone.
-- The app deletes a row *before* its photos, so a policy that joined back to
-  `specimen_records` to find the owner would find the row already gone and refuse every
-  legitimate delete.
+Objects live at **`{collector_id}/{specimen_id}/{uuid}.ext`**. The leading segment is the
+whole point: it is the only thing a storage policy can read to decide who owns an object.
+`storage.objects` has no foreign key back to `specimen_records`, and the app deletes a row
+*before* its photos — deliberately, so a blocked photo delete can never leave a row citing
+a URL that no longer resolves. A policy that joined back to `specimen_records` to find the
+owner would therefore find the row already gone and refuse every legitimate delete. With
+the owner in the path the check is local to the object and needs nothing else to still
+exist:
 
-In practice deleting someone else's photo means already knowing its exact object path,
-which the app only ever surfaces from rows you are allowed to delete. Closing it properly
-means putting the owner in the object path and migrating the existing objects — a separate
-piece of work, not done here.
+```sql
+(storage.foldername(name))[1] = auth.uid()::text or public.is_app_admin()
+```
+
+The upload policy is scoped the same way, to your own prefix. Without that half the
+ownership would be decorative — anyone could upload into someone else's prefix and then
+delete it, since the DELETE policy would read that prefix and agree it was theirs.
+
+Reading is still public, matching the bucket: the stored URLs are fetched by the browser
+with no token, from the reports and dashboard pages. Nothing here changes who may *look*
+at a specimen photo.
+
+### Legacy objects
+
+Objects uploaded before this migration sit at `{specimen_id}/{uuid}.ext`. Their first path
+segment is a specimen id, not a uid, so they match no user and become **admin-only to
+delete** until moved. That is the safe direction to fail — nothing is deleted that should
+not be, and the app reports what the bucket declined rather than claiming a cleanup that
+did not happen — but a non-admin clearing their own old entries will see *"N photo(s) are
+still in storage"* until you run:
+
+```bash
+python scripts/migrate_photo_paths.py            # dry run, changes nothing
+python scripts/migrate_photo_paths.py --apply
+```
+
+It moves each object and rewrites the `photo_urls` that point at it. Safe to re-run:
+already-prefixed objects are skipped and nothing is deleted — the move is a rename, and a
+row's URLs are rewritten only after its objects have actually moved. It needs
+`SUPABASE_SERVICE_ROLE_KEY`, because it moves other investigators' objects and rewrites
+their rows, which is exactly what RLS is there to stop a normal session doing.
+
+Objects whose specimen row is gone, or whose collector is `unattributed-legacy`, are left
+where they are: there is no owner to file them under, and inventing one would hand
+somebody the right to delete them. `sql/add_photo_ownership.sql` ends with a query that
+counts what is left.
 
 ## Doing it straight from Supabase
 

@@ -16,11 +16,13 @@ from PIL import Image
 from postgrest.types import CountMethod
 
 from utils.auth import (
+    admin_passkey_configured,
     get_current_user_email,
     get_current_user_id,
     get_supabase_client,
     is_current_user_admin,
     sign_out_user,
+    verify_admin_passkey,
 )
 from utils.logging_config import get_logger
 from utils.profile_store import load_profile, save_profile, upload_avatar
@@ -199,6 +201,13 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
 
     Scoping defaults to this collector's own records, because on a shared project a demo
     reset must not be able to take a colleague's real field data with it.
+
+    This is the one place a project-wide delete lives. The Site Log page used to carry a
+    second one of its own, which meant two controls doing the same irreversible thing with
+    different confirmations — and the one there asked for the delete passkey while the one
+    here, reachable by picking "Every record in the project" from the radio below, did not.
+    Consolidating them here (where the rest of the account's destructive actions already
+    are) leaves a single project-wide path, behind the stronger of the two gates.
     """
     st.subheader("Reset Logged Data")
     st.caption(
@@ -207,11 +216,26 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
         "first. There is no undo."
     )
 
-    # Project-wide options are offered only to registered admins. The database refuses
-    # them either way (sql/add_ownership_delete_policies.sql), so showing them to everyone
-    # would only mean presenting a control that silently does a fraction of what it says.
+    # Project-wide options need two independent things to be true, and neither is the UI's
+    # to decide on its own:
+    #
+    #   * The account is registered in public.app_admins, which is what the database checks
+    #     in its DELETE policy. It refuses these rows either way
+    #     (sql/add_ownership_delete_policies.sql), so offering the option to everyone would
+    #     only present a control that silently does a fraction of what it says.
+    #   * A delete passkey is configured. It is not the security boundary — a registered
+    #     admin holding their own token could delete through the API without ever loading
+    #     this page — it is what stops being signed in as an admin from being *by itself*
+    #     enough to empty the project: an unattended session or a misclick has to get past
+    #     something the admin knows.
+    #
+    # Unconfigured fails closed (utils.auth.verify_admin_passkey), so the option is withheld
+    # rather than shown as a prompt that cannot succeed no matter what is typed into it.
     is_admin = is_current_user_admin()
-    scopes = [_RESET_SCOPE_MINE] + ([_RESET_SCOPE_ALL] if is_admin else [])
+    passkey_ready = admin_passkey_configured()
+    project_wide_available = is_admin and passkey_ready
+
+    scopes = [_RESET_SCOPE_MINE] + ([_RESET_SCOPE_ALL] if project_wide_available else [])
 
     scope = st.radio(
         "What to clear",
@@ -220,16 +244,22 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
         help=(
             "Scoping to your own records leaves other investigators' data untouched. "
             "Clearing everything is for a project you alone are using."
-            if is_admin else
+            if project_wide_available else
             "You can clear the records you collected. Clearing the whole project is "
             "restricted to administrators."
         ),
     )
+    if is_admin and not passkey_ready:
+        st.info(
+            "Project-wide options are hidden because no delete passkey is configured. "
+            "Generate one with `python scripts/hash_admin_passkey.py` and set "
+            "`ADMIN_DELETE_PASSKEY_HASH` in the app's secrets."
+        )
     if scope == _RESET_SCOPE_MINE and not current_uid:
         st.warning("No signed-in user id available, so records cannot be scoped to you.")
         return
 
-    if is_admin:
+    if project_wide_available:
         also_bioassay = st.checkbox("Also clear all bioassay results", key="reset_bioassay")
         also_clinical = st.checkbox("Also clear all clinical case records", key="reset_clinical")
     else:
@@ -237,10 +267,22 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
         # so for a non-admin there is nothing here to offer.
         also_bioassay = also_clinical = False
 
-    if scope == _RESET_SCOPE_ALL or also_bioassay or also_clinical:
+    # Anything that reaches beyond this collector's own records, whichever control selected
+    # it. The two side tables have no scoped form, so ticking either is project-wide even
+    # while the radio still reads "only records I collected".
+    project_wide = scope == _RESET_SCOPE_ALL or also_bioassay or also_clinical
+
+    passkey = ""
+    if project_wide:
         st.warning(
             "The selections above are **project-wide** — they delete records regardless "
-            "of who logged them."
+            "of who logged them, including entries this account never recorded."
+        )
+        passkey = st.text_input(
+            "Administrator delete passkey",
+            key="reset_passkey",
+            type="password",
+            help="Set separately from your login password. Ask the project owner if unsure.",
         )
 
     typed = st.text_input(
@@ -248,10 +290,17 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
         key="reset_confirm",
         placeholder="RESET",
     )
+    ready = typed.strip().upper() == "RESET" and (bool(passkey) or not project_wide)
     if not st.button(
         "Delete logged data permanently", type="primary", width="stretch",
-        key="reset_go", disabled=typed.strip().upper() != "RESET",
+        key="reset_go", disabled=not ready,
     ):
+        return
+
+    # Checked on click, not while typing: verifying on every keystroke would run PBKDF2
+    # 240,000 times per character and turn a wrong passkey into a visibly slower page.
+    if project_wide and not verify_admin_passkey(passkey):
+        st.error("That passkey is not correct. Nothing was deleted.")
         return
 
     from utils.data_manager import (
@@ -277,24 +326,44 @@ def _render_trial_data_reset(current_uid: str | None) -> None:
             st.success(line + ".")
         else:
             st.info("No specimen records matched — the ledger was already empty.")
+        if summary.get("refused_not_yours"):
+            st.warning(
+                f"{len(summary['refused_not_yours'])} record(s) were left alone because "
+                "another investigator recorded them. Only their collector, or an "
+                "administrator, can delete them."
+            )
         if summary.get("not_deleted"):
             st.warning(
                 f"{len(summary['not_deleted'])} record(s) were refused by the database "
                 "and remain. They may belong to another account under row-level security."
             )
+        if summary.get("tally_failures"):
+            st.warning(
+                f"{len(summary['tally_failures'])} batch(es) could not have their "
+                "vialed-out tally corrected, so their collection totals are now short by "
+                "the specimens just deleted. The counts on those batches are understated "
+                "until fixed by hand."
+            )
         if summary.get("photos_orphaned"):
             st.warning(
                 f"{summary['photos_orphaned']} photo(s) are still in storage — the bucket "
                 "refused to remove them. Nothing points at those files now, but they still "
-                "count against storage and stay reachable by their public URL. Check for a "
-                "DELETE policy on storage.objects for the specimen-photos bucket "
-                "(sql/add_delete_policies.sql)."
+                "count against storage and stay reachable by their public URL. Either the "
+                "objects predate sql/add_photo_ownership.sql and are not yet owner-prefixed "
+                "(run `python scripts/migrate_photo_paths.py --apply`), or the bucket has "
+                "no DELETE policy at all (sql/add_photo_ownership.sql)."
             )
 
     if also_bioassay and bioassay_deleted is not None:
         st.success(f"Deleted **{bioassay_deleted}** bioassay result(s).")
     if also_clinical and clinical_deleted is not None:
         st.success(f"Deleted **{clinical_deleted}** clinical case record(s).")
+
+    # The passkey is not left sitting in the form after the delete it authorised. Popped
+    # rather than reassigned: Streamlit refuses to set a widget's key once the widget has
+    # been instantiated this run, and clearing it means the next project-wide reset has to
+    # enter it again rather than inheriting consent from this one.
+    st.session_state.pop("reset_passkey", None)
 
     st.caption(
         "Reload the Dashboard to see the cleared state — cached reads refresh within a minute."

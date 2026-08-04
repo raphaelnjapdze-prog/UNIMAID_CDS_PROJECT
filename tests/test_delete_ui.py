@@ -9,6 +9,8 @@ import pandas as pd
 import pytest
 from streamlit.testing.v1 import AppTest
 
+from components.profile import _RESET_SCOPE_ALL as _ALL
+
 
 def _row(specimen_id, *, anopheles=500, vialed=None, date="2026-07-20"):
     result: dict = {"anopheles_count": anopheles, "culex_count": 0, "aedes_count": 0}
@@ -184,70 +186,202 @@ class TestVialedIndividualsAreFlaggedBeforeConfirming:
         assert any("40" in w.value for w in at.warning)
 
 
-class TestTheAdminBulkDeleteIsReachable:
-    """The project-wide delete lived inside the entry picker, which returns early — when
-    nothing is selected, and when there is nothing to select. So it only appeared after you
-    had ticked an entry in the list above it, and never at all for an admin with no entries
-    of their own. Caught by opening the page, not by any test, which is why these exist."""
+class TestSiteLogHasNoProjectWideDelete:
+    """The Site Log page deletes what you picked, and nothing else.
 
-    def _as_admin(self, monkeypatch, *, passkey_set=True, owner="me"):
-        import components.site_log as site_log
+    It used to carry a project-wide "delete every entry" control of its own, next to the
+    picker. That made two irreversible controls for the same action, gated differently —
+    the Site Log one asked for the delete passkey, and the Profile one (reachable by
+    choosing "Every record in the project") did not. The passkey-gated version is the one
+    that survived, on Profile; these assert the duplicate is gone rather than merely
+    hidden, since a control that reappears for admins is the failure worth catching."""
 
-        monkeypatch.setattr(site_log, "is_current_user_admin", lambda: True)
-        monkeypatch.setattr(site_log, "get_current_user_id", lambda: "me")
-        monkeypatch.setattr(site_log, "admin_passkey_configured", lambda: passkey_set)
-        monkeypatch.setattr(site_log, "fetch_batch_children", lambda _b: pd.DataFrame())
-        monkeypatch.setattr(site_log, "delete_specimen_records", lambda *_a, **_k: None)
-        monkeypatch.setattr(site_log, "delete_all_specimen_records", lambda *_a, **_k: None)
-        row = _row("batch-1")
-        row["collector_id"] = owner
-        monkeypatch.setattr(site_log, "load_specimen_records", lambda: pd.DataFrame([row]))
-
-    def test_an_admin_sees_it_without_selecting_anything(self, monkeypatch):
-        self._as_admin(monkeypatch)
-
-        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
-        at.run()
-
-        assert any(t.key == "sitelog_admin_passkey" for t in at.text_input)
-
-    def test_an_admin_sees_it_when_every_entry_belongs_to_someone_else(self, monkeypatch):
-        """Clearing a project you did not personally log is the whole point of the control,
-        so it must not depend on the admin having entries of their own in the picker."""
-        self._as_admin(monkeypatch, owner="another-investigator")
-
-        at = AppTest.from_function(_recent_entries_app, default_timeout=30)
-        at.run()
-
-        assert any(t.key == "sitelog_admin_passkey" for t in at.text_input)
-
-    def test_a_non_admin_never_sees_it(self, site_log):
+    def test_a_non_admin_sees_no_project_wide_control(self, site_log):
         at = AppTest.from_function(_recent_entries_app, default_timeout=30)
         at.run()
 
         assert not any(t.key == "sitelog_admin_passkey" for t in at.text_input)
         assert not any(b.key == "sitelog_admin_go" for b in at.button)
 
-    def test_no_passkey_configured_disables_it_rather_than_prompting(self, monkeypatch):
-        """A prompt that cannot succeed no matter what is typed is worse than saying so."""
-        self._as_admin(monkeypatch, passkey_set=False)
+    def test_an_admin_sees_no_project_wide_control_either(self, site_log, monkeypatch):
+        import components.site_log as site_log_mod
+
+        monkeypatch.setattr(site_log_mod, "is_current_user_admin", lambda: True)
 
         at = AppTest.from_function(_recent_entries_app, default_timeout=30)
         at.run()
 
         assert not any(t.key == "sitelog_admin_passkey" for t in at.text_input)
-        assert any("passkey is configured" in i.value for i in at.info)
+        assert not any(b.key == "sitelog_admin_go" for b in at.button)
 
-    def test_the_button_stays_disabled_until_both_gates_are_filled(self, monkeypatch):
-        self._as_admin(monkeypatch)
+    def test_an_admin_is_told_where_the_project_wide_delete_went(self, site_log, monkeypatch):
+        """Moving a control without saying so just makes it look deleted."""
+        import components.site_log as site_log_mod
+
+        monkeypatch.setattr(site_log_mod, "is_current_user_admin", lambda: True)
 
         at = AppTest.from_function(_recent_entries_app, default_timeout=30)
         at.run()
 
-        assert at.button(key="sitelog_admin_go").disabled, "armed with neither field filled"
+        assert any("Profile" in c.value for c in at.caption)
 
-        at.text_input(key="sitelog_admin_passkey").set_value("something").run()
-        assert at.button(key="sitelog_admin_go").disabled, "armed on the passkey alone"
 
-        at.text_input(key="sitelog_admin_confirm").set_value("DELETE EVERYTHING").run()
-        assert not at.button(key="sitelog_admin_go").disabled
+def _trial_reset_app():
+    from components.profile import _render_trial_data_reset
+
+    _render_trial_data_reset("me")
+
+
+def _profile_page_app():
+    from components.profile import render_profile_page
+
+    render_profile_page()
+
+
+class TestTheProjectWideDeleteIsGatedByThePasskey:
+    """Profile's "Every record in the project" reset deletes everyone's data, and before
+    the Site Log control was folded into it, it asked only for the word RESET — the passkey
+    lived on the other page, guarding the other copy of the same action. These pin that the
+    project-wide path cannot run without it, and that the scoped path is not burdened by
+    it: clearing your own trial run is not an administrative act."""
+
+    def _profile(self, monkeypatch, *, admin=True, passkey_set=True, passkey_ok=True):
+        import components.profile as profile
+
+        monkeypatch.setattr(profile, "is_current_user_admin", lambda: admin)
+        monkeypatch.setattr(profile, "admin_passkey_configured", lambda: passkey_set)
+        monkeypatch.setattr(profile, "verify_admin_passkey", lambda _p: passkey_ok)
+
+        calls = []
+        import utils.data_manager as dm
+
+        def fake_delete_all(*, collector_id=None):
+            calls.append(collector_id)
+            return {
+                "requested": 1, "deleted": 1, "cascaded_children": 0, "photos_removed": 0,
+                "photos_orphaned": 0, "batches_restored": {}, "tally_failures": [],
+                "not_deleted": [], "refused_not_yours": [],
+            }
+
+        monkeypatch.setattr(dm, "delete_all_specimen_records", fake_delete_all)
+        return calls
+
+    def _arm(self, at, *, passkey=None):
+        if passkey is not None:
+            at.text_input(key="reset_passkey").set_value(passkey).run()
+        at.text_input(key="reset_confirm").set_value("RESET").run()
+        return at
+
+    def test_choosing_project_wide_asks_for_the_passkey(self, monkeypatch):
+        self._profile(monkeypatch)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+        at.radio(key="reset_scope").set_value(_ALL).run()
+
+        assert any(t.key == "reset_passkey" for t in at.text_input)
+
+    def test_the_scoped_reset_does_not_ask_for_it(self, monkeypatch):
+        """Deleting only what you recorded is an ordinary action, not an administrative one."""
+        self._profile(monkeypatch)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+
+        assert not any(t.key == "reset_passkey" for t in at.text_input)
+
+    def test_button_stays_disabled_until_the_passkey_is_entered(self, monkeypatch):
+        self._profile(monkeypatch)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+        at.radio(key="reset_scope").set_value(_ALL).run()
+        at.text_input(key="reset_confirm").set_value("RESET").run()
+
+        assert at.button(key="reset_go").disabled, "armed on the typed word alone"
+
+        at.text_input(key="reset_passkey").set_value("something").run()
+        assert not at.button(key="reset_go").disabled
+
+    def test_a_wrong_passkey_deletes_nothing(self, monkeypatch):
+        calls = self._profile(monkeypatch, passkey_ok=False)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+        at.radio(key="reset_scope").set_value(_ALL).run()
+        self._arm(at, passkey="wrong")
+        at.button(key="reset_go").click().run()
+
+        assert calls == [], "a rejected passkey still reached the data layer"
+        assert any("not correct" in e.value for e in at.error)
+
+    def test_a_correct_passkey_deletes_project_wide(self, monkeypatch):
+        calls = self._profile(monkeypatch)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+        at.radio(key="reset_scope").set_value(_ALL).run()
+        self._arm(at, passkey="right")
+        at.button(key="reset_go").click().run()
+
+        assert calls == [None], "project-wide delete must pass collector_id=None"
+
+    def test_a_non_admin_is_not_offered_the_project_wide_scope(self, monkeypatch):
+        self._profile(monkeypatch, admin=False)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+
+        assert _ALL not in at.radio(key="reset_scope").options
+
+    def test_an_unconfigured_passkey_withholds_the_scope_rather_than_prompting(self, monkeypatch):
+        """Fails closed: verify_admin_passkey refuses everything when the hash is unset, so
+        offering the option would present a control that cannot succeed."""
+        self._profile(monkeypatch, passkey_set=False)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+
+        assert _ALL not in at.radio(key="reset_scope").options
+        assert any("no delete passkey is configured" in i.value.lower() for i in at.info)
+
+    def test_the_passkey_field_is_reachable_from_the_whole_page(self, monkeypatch):
+        """Rendering the section directly proves it works, not that anyone can get to it.
+
+        That is the exact gap that hid the previous project-wide control: every test drove
+        it in isolation, it passed, and the button was invisible in the running app because
+        the code path reaching it returned early. So this one renders render_profile_page()
+        itself and looks for the field through the real page.
+        """
+        self._profile(monkeypatch)
+
+        import components.profile as profile
+
+        # Stub the two things that reach the network — the profile store and the Supabase
+        # client — and let the rest of the page run for real. Stubbing the intermediate
+        # helpers instead means hand-writing the dicts they return, which drifts from the
+        # keys the page actually indexes and fails for reasons that are not the point here.
+        monkeypatch.setattr(profile, "load_profile", lambda _uid: None)
+        monkeypatch.setattr(profile, "get_supabase_client", lambda: None)
+        monkeypatch.setattr(profile, "get_current_user_id", lambda: "me")
+        monkeypatch.setattr(profile, "get_current_user_email", lambda: "t@example.com")
+
+        at = AppTest.from_function(_profile_page_app, default_timeout=60)
+        at.run()
+
+        assert not at.exception, [str(e) for e in at.exception]
+        assert _ALL in at.radio(key="reset_scope").options, "admin scope missing from the page"
+
+        at.radio(key="reset_scope").set_value(_ALL).run()
+        assert any(t.key == "reset_passkey" for t in at.text_input)
+
+    def test_a_side_table_alone_is_project_wide_and_needs_the_passkey(self, monkeypatch):
+        """bioassay_results and clinical_case_data have no scoped form — ticking either
+        clears everyone's, even while the radio still reads "only records I collected"."""
+        self._profile(monkeypatch)
+
+        at = AppTest.from_function(_trial_reset_app, default_timeout=30)
+        at.run()
+        at.checkbox(key="reset_bioassay").set_value(True).run()
+
+        assert any(t.key == "reset_passkey" for t in at.text_input)

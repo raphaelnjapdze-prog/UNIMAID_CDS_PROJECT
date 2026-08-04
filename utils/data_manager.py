@@ -84,12 +84,26 @@ def _upload_photo_bytes(
     Uploads raw image bytes to the specimen-photos Supabase Storage bucket and
     returns its public URL, or None on failure. Shared by the file-upload and
     multi-angle (in-memory bytes) capture paths so both hit the same bucket.
+
+    The object path opens with the uploader's id — `{owner}/{specimen_id}/{uuid}.ext` —
+    because that prefix is the only thing a storage policy can read to decide who owns an
+    object. A storage row carries no foreign key back to specimen_records, and the deletion
+    path removes the row *before* its photos, so a policy that joined back to find the
+    owner would find the row already gone and refuse every legitimate delete. With the
+    owner in the path the test is local to the object and needs nothing else to still
+    exist. See sql/add_photo_ownership.sql; existing objects are moved into this shape by
+    scripts/migrate_photo_paths.py.
     """
     client = get_supabase_client()
     if client is None or not file_bytes:
         return None
+    # Refused rather than filed under a blank prefix: an object whose first path segment
+    # is empty belongs to nobody, and the INSERT policy rejects it anyway.
+    owner = require_current_user_id()
+    if owner is None:
+        return None
     try:
-        path = f"{specimen_id}/{uuid.uuid4()}.{ext}"
+        path = f"{owner}/{specimen_id}/{uuid.uuid4()}.{ext}"
         client.storage.from_("specimen-photos").upload(
             path, file_bytes, {"content-type": content_type or "image/jpeg"}
         )
@@ -960,9 +974,15 @@ def _storage_path_from_public_url(url: str) -> str | None:
 
     Storage takes bucket-relative paths, but the row only ever keeps the full public URL
     that get_public_url() handed back:
-    ".../object/public/specimen-photos/<specimen_id>/<uuid>.jpg". Anything not shaped like
-    that (a hand-edited row, a URL from another bucket) yields None and is left alone
-    rather than guessed at.
+    ".../object/public/specimen-photos/<owner>/<specimen_id>/<uuid>.jpg". Anything not
+    shaped like that (a hand-edited row, a URL from another bucket) yields None and is left
+    alone rather than guessed at.
+
+    Everything after the bucket name is returned whole, so this reads both the current
+    owner-prefixed path and the legacy "<specimen_id>/<uuid>.jpg" objects that predate
+    sql/add_photo_ownership.sql. Legacy objects still parse and are still deleted; what
+    they no longer do is match the ownership policy, so until they are migrated only an
+    admin can remove them and delete_specimen_photos() reports the rest as orphaned.
     """
     if not isinstance(url, str):
         return None

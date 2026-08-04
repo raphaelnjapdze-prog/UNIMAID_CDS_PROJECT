@@ -228,6 +228,19 @@ class TestPhotoUrlParsing:
         url = _photo_url("s1") + "?token=abc"
         assert dm._storage_path_from_public_url(url) == "s1/a.jpg"
 
+    def test_reads_an_owner_prefixed_path_whole(self):
+        """Objects are stored at {owner}/{specimen}/{uuid} since
+        sql/add_photo_ownership.sql. Everything after the bucket name is the path — taking
+        only the last two segments would hand Storage a path that does not exist and leave
+        the object behind while reporting it removed."""
+        url = _photo_url("uid-1/s1")
+        assert dm._storage_path_from_public_url(url) == "uid-1/s1/a.jpg"
+
+    def test_still_reads_a_legacy_flat_path(self):
+        """Objects uploaded before the migration are still deletable — by their owner only
+        once the policy lands, but the app must not stop recognising them."""
+        assert dm._storage_path_from_public_url(_photo_url("s1")) == "s1/a.jpg"
+
     def test_url_from_another_bucket_is_left_alone(self):
         # Guessing a path here would delete somebody else's object.
         url = "https://proj.supabase.co/storage/v1/object/public/profile-avatars/u/av.png"
@@ -236,6 +249,69 @@ class TestPhotoUrlParsing:
     @pytest.mark.parametrize("value", [None, "", 123, "not a url"])
     def test_junk_yields_no_path(self, value):
         assert dm._storage_path_from_public_url(value) is None
+
+
+class TestPhotoObjectsCarryTheirOwner:
+    """The object path is the only place a storage policy can read ownership from.
+
+    storage.objects has no foreign key back to specimen_records, and the deletion path
+    removes the row *before* its photos — so a policy that joined back to find the owner
+    would find the row already gone and refuse every legitimate delete. Putting the
+    collector id in the path makes the test local to the object. The DELETE policy in
+    sql/add_photo_ownership.sql reads (storage.foldername(name))[1], which is exactly the
+    first segment asserted here; changing this shape silently un-scopes the bucket, because
+    a path whose first segment is not a uid matches no user and the policy just stops
+    granting anything.
+    """
+
+    def _storage(self, monkeypatch, *, user="uid-1"):
+        uploaded = []
+
+        class _Bucket:
+            def upload(self, path, _bytes, _opts):
+                uploaded.append(path)
+
+            def get_public_url(self, path):
+                return f"https://proj.supabase.co/storage/v1/object/public/{BUCKET}/{path}"
+
+        class _Storage:
+            def from_(self, _bucket):
+                return _Bucket()
+
+        class _Client:
+            storage = _Storage()
+
+        monkeypatch.setattr(dm, "get_supabase_client", lambda: _Client())
+        monkeypatch.setattr(dm, "get_current_user_id", lambda: user)
+        return uploaded
+
+    def test_the_path_opens_with_the_uploader_id(self, monkeypatch):
+        uploaded = self._storage(monkeypatch)
+
+        dm._upload_photo_bytes(b"jpegbytes", "specimen-9", "jpg", "image/jpeg")
+
+        assert len(uploaded) == 1
+        assert uploaded[0].split("/")[0] == "uid-1"
+        assert uploaded[0].split("/")[1] == "specimen-9"
+
+    def test_the_returned_url_round_trips_back_to_the_same_path(self, monkeypatch):
+        """The row stores the public URL, and deletion parses the path back out of it. If
+        these two disagree the object is never found and silently survives every delete."""
+        uploaded = self._storage(monkeypatch)
+
+        url = dm._upload_photo_bytes(b"jpegbytes", "specimen-9", "jpg", "image/jpeg")
+
+        assert dm._storage_path_from_public_url(url) == uploaded[0]
+
+    def test_no_signed_in_user_uploads_nothing(self, monkeypatch):
+        """An object filed under a blank prefix belongs to nobody and would be deletable by
+        nobody. The INSERT policy rejects it too; refusing here makes the reason visible."""
+        uploaded = self._storage(monkeypatch, user="")
+
+        result = dm._upload_photo_bytes(b"jpegbytes", "specimen-9", "jpg", "image/jpeg")
+
+        assert result is None
+        assert uploaded == []
 
 
 class TestSubsampledGenusIsRecoverable:
